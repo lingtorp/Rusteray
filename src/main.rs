@@ -73,6 +73,9 @@ struct Triangle {
     v0: Vec3,
     v1: Vec3,
     v2: Vec3,
+    n0: Vec3,
+    n1: Vec3,
+    n2: Vec3,
 }
 
 impl Triangle {
@@ -154,8 +157,14 @@ impl Scene {
             println!("model[{}].indices: {}", i, mesh.indices.len());
             assert!(mesh.indices.len() % 3 == 0);
 
+            assert!(!mesh.normals.is_empty(), "Model lacks normals.");
+            assert!(
+                !mesh.texcoords.is_empty(),
+                "Model lacks texture coordinates."
+            );
+
             for idxs in mesh.indices.chunks(3) {
-                let mut v = [Vec3::zero(), Vec3::zero(), Vec3::zero()];
+                let mut v = [Vec3::default(); 3];
                 for i in 0..3 {
                     let idx = idxs[i] as usize;
                     let x = mesh.positions[3 * idx];
@@ -164,10 +173,22 @@ impl Scene {
                     v[i] = Vec3 { x: x, y: y, z: z }
                 }
 
+                let mut n = [Vec3::default(); 3];
+                for i in 0..3 {
+                    let idx = idxs[i] as usize;
+                    let x = mesh.normals[3 * idx];
+                    let y = mesh.normals[3 * idx + 1];
+                    let z = mesh.normals[3 * idx + 2];
+                    n[i] = Vec3 { x: x, y: y, z: z }
+                }
+
                 triangles.push(Triangle {
                     v0: v[0],
                     v1: v[1],
                     v2: v[2],
+                    n0: n[0],
+                    n1: n[1],
+                    n2: n[2],
                 });
             }
         }
@@ -237,8 +258,8 @@ fn main() {
     let scene = Scene::new("/home/alexander/Desktop/models/u_logo.obj");
     let from = Vec3 {
         x: 0.0,
-        y: 0.0,
-        z: 6.0,
+        y: 2.0,
+        z: 2.0,
     };
     let to = Vec3::zero();
     let camera = Camera::new(from, to);
