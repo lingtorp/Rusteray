@@ -1,5 +1,5 @@
 [package]
-name = "Rusteray"
+name = "rusteray"
 version = "0.1.0"
 authors = ["Alexander Lingtorp <alexander@lingtorp.com>"]
 edition = "2018"

@@ -12,6 +12,7 @@ const WINDOW_WIDTH: usize = 400;
 const WINDOW_HEIGHT: usize = 400;
 
 struct Camera {
+    frame_anchor: Vec3,
     u: Vec3,
     v: Vec3,
     fov: f32,
@@ -21,34 +22,52 @@ struct Camera {
 
 impl Camera {
     fn new() -> Camera {
+        let position = Vec3::z() * 10.0;
+        let fov: f32 = 75.0;
+
+        let aspect = (WINDOW_HEIGHT as f32) / (WINDOW_WIDTH as f32);
+        let theta = fov.to_radians();
+
+        let half_height = (theta / 2.0).tan();
+        let half_width  = aspect * half_height;
+
+        let u = Vec3::x() * (WINDOW_WIDTH as f32);
+        let v = Vec3::y() * (WINDOW_HEIGHT as f32);
+        let frame_anchor = position - half_width * u - half_height * v;
+
+        let direction =  Vec3{x: 0.0, y: 0.0, z: 1.0};
+
         Camera {
-            u: Vec3{x: 1.0, y: 0.0, z: 0.0},
-            v: Vec3{x: 0.0, y: 1.0, z: 0.0},
-            fov: 75.0,
-            position: Vec3{x: 0.0, y: 0.0, z: 0.0},
-            direction: Vec3{x: 0.0, y: 0.0, z: 1.0}
+            frame_anchor: frame_anchor,
+            u: u,
+            v: v,
+            fov: fov,
+            position: position,
+            direction: direction
        }
     }
 
+    // (s, t) screen based offsets
     fn ray(&self, s: f32, t: f32) -> Ray {
-        Ray{origin: self.position + s * self.u + t * self.v, direction: self.direction}
+        let o =  self.position + s * self.u + t * self.v;
+        let d = self.frame_anchor + self.direction - self.position;
+        Ray{origin: o, direction: d}
     }
 }
 
-struct HitData {
-
-}
-
+#[derive(Debug)]
 enum RaycastResult {
     Miss,
-    Hit(HitData)
+    Hit{t: f32, u: f32, v: f32}
 }
 
+#[derive(Debug)]
 struct Ray {
     pub origin: Vec3,
     pub direction: Vec3
 }
 
+#[derive(Debug)]
 struct Triangle {
     v0: Vec3,
     v1: Vec3,
@@ -56,7 +75,34 @@ struct Triangle {
 }
 
 impl Triangle {
+    // Ray-triangle intersection test from Real-Time Rendering 4th Edition (p. 964)
+    fn intersects(&self, ray: &Ray) -> RaycastResult {
+        let e1 = self.v1 - self.v0;
+        let e2 = self.v2 - self.v0;
+        let q = ray.direction.cross(&e2);
 
+        let a = e1.dot(&q);
+        if a < std::f32::EPSILON && a > std::f32::EPSILON {
+            return RaycastResult::Miss;
+        }
+
+        let f = 1.0 / a;
+        let s = ray.origin - self.v0;
+        let u = f * (s.dot(&q));
+
+        if u < 0.0 {
+            return RaycastResult::Miss;
+        }
+
+        let r = s.cross(&e1);
+        let v = f * (ray.direction.dot(&r));
+        if v < 0.0 || u + v > 1.0 {
+            return RaycastResult::Miss;
+        }
+
+        let t = f * (e2.dot(&r));
+        RaycastResult::Hit{t, u, v}
+    }
 }
 
 struct Scene {
@@ -65,6 +111,10 @@ struct Scene {
 
 impl Scene {
     fn new(path: &str) -> Scene {
+        // let mut triangles: Vec<Triangle> = Vec::new();
+        // triangles.push(Triangle{v0: Vec3{x: 0.0, y: 0.5, z: 0.0}, v1: Vec3{x: -0.5, y: 0.0, z: 0.0}, v2: Vec3{x: 0.5, y: 0.0, z: 0.0}});
+        // Scene{triangles: triangles}
+
         let obj = tobj::load_obj(&Path::new(path));
         assert!(obj.is_ok());
         let (models, materials) = obj.unwrap();
@@ -104,7 +154,14 @@ impl Scene {
     }
 
     fn trace(&self, ray: &Ray) -> u32 {
-        255
+        for triangle in &self.triangles {
+            let res = triangle.intersects(&ray);
+            match res {
+                RaycastResult::Hit{t, u, v} => return 255,
+                RaycastResult::Miss => continue
+            };
+        }
+        0
     }
 }
 
@@ -125,9 +182,10 @@ fn main() {
         for x in 0..WINDOW_WIDTH {
             for y in 0..WINDOW_HEIGHT {
                 for s in 0..1 {
-                    let s = (x / WINDOW_WIDTH) as f32;
-                    let t = (y / WINDOW_HEIGHT) as f32;
+                    let s = (x as f32) / (WINDOW_WIDTH as f32);
+                    let t = (y as f32) / (WINDOW_HEIGHT as f32);
                     let ray = camera.ray(s, t);
+                    println!("{:?}", ray);
                     buffer[x * WINDOW_WIDTH + y] = scene.trace(&ray);
                 }
             }
