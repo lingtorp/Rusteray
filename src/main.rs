@@ -142,13 +142,6 @@ fn fmax(t0: f32, t1: f32) -> f32 {
 }
 
 impl AABB {
-    fn new() -> AABB {
-        AABB {
-            min: Vec3::zero(),
-            max: Vec3::zero(),
-        }
-    }
-
     // Intersection test using 3D slab-method
     fn intersects(&self, ray: &Ray) -> bool {
         let min = (self.min - ray.origin) / ray.direction;
