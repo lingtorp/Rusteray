@@ -18,6 +18,8 @@ struct Camera {
     position: Vec3,
 }
 
+// TODO: Actual ray bouncing and material support
+
 impl Camera {
     fn new(from: Vec3, to: Vec3) -> Camera {
         let fov: f32 = 75.0;
@@ -68,7 +70,7 @@ struct Ray {
     pub direction: Vec3,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default, Clone, Copy)]
 struct Triangle {
     v0: Vec3,
     v1: Vec3,
@@ -107,10 +109,246 @@ impl Triangle {
         let t = f * (e2.dot(&r));
         RaycastResult::Hit { t, u, v }
     }
+
+    fn centroid(&self) -> Vec3 {
+        Vec3 {
+            x: self.v0.x + self.v1.x + self.v2.x / 3.0,
+            y: self.v0.y + self.v1.y + self.v2.y / 3.0,
+            z: self.v0.z + self.v1.z + self.v2.z / 3.0,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct AABB {
+    min: Vec3,
+    max: Vec3,
+}
+
+fn fmin(t0: f32, t1: f32) -> f32 {
+    if t0 < t1 {
+        t0
+    } else {
+        t1
+    }
+}
+
+fn fmax(t0: f32, t1: f32) -> f32 {
+    if t0 > t1 {
+        t0
+    } else {
+        t1
+    }
+}
+
+impl AABB {
+    fn new() -> AABB {
+        AABB {
+            min: Vec3::zero(),
+            max: Vec3::zero(),
+        }
+    }
+
+    // Intersection test using 3D slab-method
+    fn intersects(&self, ray: &Ray) -> RaycastResult {
+        {
+            let t0 = fmin(
+                (self.min.x - ray.origin.x) / ray.direction.x,
+                (self.max.x - ray.origin.x) / ray.direction.x,
+            );
+            let t1 = fmax(
+                (self.min.x - ray.origin.x) / ray.direction.x,
+                (self.max.x - ray.origin.x) / ray.direction.x,
+            );
+            if t0 <= t1 {
+                return RaycastResult::Miss;
+            }
+        }
+
+        RaycastResult::Miss
+    }
+
+    fn from_triangles(triangles: &[Triangle]) -> AABB {
+        let mut min_x = std::f32::MAX;
+        let mut min_y = std::f32::MAX;
+        let mut min_z = std::f32::MAX;
+        let mut max_x = std::f32::MIN;
+        let mut max_y = std::f32::MIN;
+        let mut max_z = std::f32::MIN;
+
+        for triangle in triangles {
+            // Min
+            if triangle.v0.x < min_x {
+                min_x = triangle.v0.x;
+            }
+            if triangle.v1.x < min_x {
+                min_x = triangle.v1.x;
+            }
+            if triangle.v2.x < min_x {
+                min_x = triangle.v2.x;
+            }
+
+            if triangle.v0.y < min_y {
+                min_y = triangle.v0.y;
+            }
+            if triangle.v1.y < min_y {
+                min_y = triangle.v1.y;
+            }
+            if triangle.v2.y < min_y {
+                min_y = triangle.v2.y;
+            }
+
+            if triangle.v0.z < min_z {
+                min_z = triangle.v0.z;
+            }
+            if triangle.v1.z < min_z {
+                min_z = triangle.v1.z;
+            }
+            if triangle.v2.z < min_z {
+                min_z = triangle.v2.z;
+            }
+
+            // Max
+            if triangle.v0.x > max_x {
+                max_x = triangle.v0.x;
+            }
+            if triangle.v1.x > max_x {
+                max_x = triangle.v1.x;
+            }
+            if triangle.v2.x > max_x {
+                max_x = triangle.v2.x;
+            }
+
+            if triangle.v0.y > max_y {
+                max_y = triangle.v0.y;
+            }
+            if triangle.v1.y > max_y {
+                max_y = triangle.v1.y;
+            }
+            if triangle.v2.y > max_y {
+                max_y = triangle.v2.y;
+            }
+
+            if triangle.v0.z > max_z {
+                max_z = triangle.v0.z;
+            }
+            if triangle.v1.z > max_z {
+                max_z = triangle.v1.z;
+            }
+            if triangle.v2.z > max_z {
+                max_z = triangle.v2.z;
+            }
+        }
+
+        AABB {
+            min: Vec3 {
+                x: min_x,
+                y: min_y,
+                z: min_z,
+            },
+            max: Vec3 {
+                x: max_x,
+                y: max_y,
+                z: max_z,
+            },
+        }
+    }
+
+    fn is_point_inside(&self, p: Vec3) -> bool {
+        if p.x > self.max.x {
+            return false;
+        }
+        if p.y > self.max.y {
+            return false;
+        }
+        if p.z > self.max.z {
+            return false;
+        }
+        if p.x < self.min.x {
+            return false;
+        }
+        if p.y < self.min.y {
+            return false;
+        }
+        if p.z < self.min.z {
+            return false;
+        }
+        true
+    }
+
+    fn subdivide(&self, dimension: usize) -> Vec<AABB> {
+        let size = self.max - self.min / (dimension as f32);
+        let mut aabbs = Vec::new();
+
+        for i in 0..dimension {
+            for j in 0..dimension {
+                for k in 0..dimension {
+                    let offset = Vec3 {
+                        x: i as f32,
+                        y: j as f32,
+                        z: k as f32,
+                    };
+                    let min = self.min + size * offset;
+                    let aabb = AABB {
+                        min: min,
+                        max: min + size,
+                    };
+                    println!("{:?}", aabb);
+                    aabbs.push(aabb);
+                }
+            }
+        }
+        aabbs
+    }
+}
+
+struct Octree {
+    dimension: usize,
+    aabbs: Vec<AABB>,
+    triangles: Vec<Vec<Triangle>>,
+}
+
+impl Octree {
+    fn new(dimension: usize, triangles: Vec<Triangle>) -> Octree {
+        let root_aabb = AABB::from_triangles(&triangles);
+        let aabbs = root_aabb.subdivide(dimension);
+
+        // FIXME: Places triangles in correct AABB based on centroid location
+        let mut aabb_triangles: Vec<Vec<Triangle>> = Vec::new();
+        for _ in 0..dimension * dimension * dimension {
+            aabb_triangles.push(Vec::new());
+        }
+
+        for triangle in triangles {
+            let centroid = triangle.centroid();
+            for (i, aabb) in aabbs.iter().enumerate() {
+                if aabb.is_point_inside(centroid) {
+                    aabb_triangles[i].push(triangle);
+                }
+            }
+        }
+
+        Octree {
+            dimension: dimension,
+            aabbs: aabbs,
+            triangles: aabb_triangles,
+        }
+    }
+
+    fn intersects(&self, ray: &Ray) -> RaycastResult {
+        for aabb in &self.aabbs {
+            let res = aabb.intersects(ray);
+            match res {
+                RaycastResult::Hit { t, u, v } => res,
+                RaycastResult::Miss => continue,
+            };
+        }
+        RaycastResult::Miss
+    }
 }
 
 struct Scene {
-    triangles: Vec<Triangle>,
+    octrees: Vec<Octree>,
 }
 
 impl Scene {
@@ -137,14 +375,19 @@ impl Scene {
         //     triangles: triangles,
         // }
 
+        let dimension = 2;
+
         let obj = tobj::load_obj(&Path::new(path));
         assert!(obj.is_ok());
         let (models, materials) = obj.unwrap();
 
+        let start = std::time::Instant::now();
+        println!("Starting to load scene ...");
+
         println!("# of models: {}", models.len());
         println!("$ of materials: {}", materials.len());
 
-        let mut triangles: Vec<Triangle> = Vec::new();
+        let mut octrees = Vec::new();
 
         for (i, m) in models.iter().enumerate() {
             let mesh = &m.mesh;
@@ -157,12 +400,15 @@ impl Scene {
             println!("model[{}].indices: {}", i, mesh.indices.len());
             assert!(mesh.indices.len() % 3 == 0);
 
+            println!("model[{}].triangles: {}", i, mesh.indices.len() / 3);
+
             assert!(!mesh.normals.is_empty(), "Model lacks normals.");
             assert!(
                 !mesh.texcoords.is_empty(),
                 "Model lacks texture coordinates."
             );
 
+            let mut triangles = Vec::new();
             for idxs in mesh.indices.chunks(3) {
                 let mut v = [Vec3::default(); 3];
                 for i in 0..3 {
@@ -191,11 +437,19 @@ impl Scene {
                     n2: n[2],
                 });
             }
+
+            octrees.push(Octree::new(dimension, triangles));
         }
 
-        Scene {
-            triangles: triangles,
-        }
+        let end = std::time::Instant::now();
+        let diff = end - start;
+        println!(
+            "Scene loaded in: {}.{} secs",
+            diff.as_secs(),
+            diff.subsec_millis()
+        );
+
+        Scene { octrees: octrees }
     }
 
     fn trace_background(&self, ray: &Ray) -> Vec3 {
@@ -210,8 +464,8 @@ impl Scene {
     }
 
     fn trace(&self, ray: &Ray) -> Vec3 {
-        for triangle in &self.triangles {
-            let res = triangle.intersects(&ray);
+        for octree in &self.octrees {
+            let res = octree.intersects(&ray);
             match res {
                 RaycastResult::Hit { t, u, v } => return Vec3::new(0.5),
                 RaycastResult::Miss => continue,
@@ -255,7 +509,7 @@ fn main() {
         panic!("{}", e);
     });
 
-    let scene = Scene::new("/home/alexander/Desktop/models/u_logo.obj");
+    let scene = Scene::new("/home/alexander/Desktop/models/rust_logo.obj");
     let from = Vec3 {
         x: 0.0,
         y: 2.0,
@@ -265,6 +519,8 @@ fn main() {
     let camera = Camera::new(from, to);
 
     while window.is_open() && !window.is_key_down(Key::Escape) {
+        let start = std::time::Instant::now();
+
         for x in 0..WINDOW_WIDTH {
             for y in 0..WINDOW_HEIGHT {
                 for s in 0..1 {
@@ -277,6 +533,14 @@ fn main() {
                 }
             }
         }
+
+        let end = std::time::Instant::now();
+        let diff = end - start;
+        println!(
+            "Frame rendered in: {}.{} secs",
+            diff.as_secs(),
+            diff.subsec_millis()
+        );
 
         window.update_with_buffer(&buffer).unwrap();
     }
