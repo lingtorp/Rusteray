@@ -112,9 +112,9 @@ impl Triangle {
 
     fn centroid(&self) -> Vec3 {
         Vec3 {
-            x: self.v0.x + self.v1.x + self.v2.x / 3.0,
-            y: self.v0.y + self.v1.y + self.v2.y / 3.0,
-            z: self.v0.z + self.v1.z + self.v2.z / 3.0,
+            x: (self.v0.x + self.v1.x + self.v2.x) / 3.0,
+            y: (self.v0.y + self.v1.y + self.v2.y) / 3.0,
+            z: (self.v0.z + self.v1.z + self.v2.z) / 3.0,
         }
     }
 }
@@ -150,22 +150,44 @@ impl AABB {
     }
 
     // Intersection test using 3D slab-method
-    fn intersects(&self, ray: &Ray) -> RaycastResult {
+    fn intersects(&self, ray: &Ray) -> bool {
+        let min = (self.min - ray.origin) / ray.direction;
+        let max = (self.max - ray.origin) / ray.direction;
+
+        let mut tmin = 0.001;
+        let mut tmax = std::f32::MAX; 
+
         {
-            let t0 = fmin(
-                (self.min.x - ray.origin.x) / ray.direction.x,
-                (self.max.x - ray.origin.x) / ray.direction.x,
-            );
-            let t1 = fmax(
-                (self.min.x - ray.origin.x) / ray.direction.x,
-                (self.max.x - ray.origin.x) / ray.direction.x,
-            );
-            if t0 <= t1 {
-                return RaycastResult::Miss;
+            let t0 = fmin(min.x, max.x);
+            let t1 = fmax(min.x, max.x);
+            tmin = fmax(t0, tmin);
+            tmax = fmin(t1, tmax);
+            if tmax < tmin {
+                return false;
             }
         }
 
-        RaycastResult::Miss
+        {
+            let t0 = fmin(min.y, max.y);
+            let t1 = fmax(min.y, max.y);
+            tmin = fmax(t0, tmin);
+            tmax = fmin(t1, tmax);
+            if tmax < tmin {
+                return false;
+            }
+        }
+
+        {
+            let t0 = fmin(min.z, max.z);
+            let t1 = fmax(min.z, max.z);
+            tmin = fmax(t0, tmin);
+            tmax = fmin(t1, tmax);
+            if tmax < tmin {
+                return false;
+            }
+        }
+
+        true
     }
 
     fn from_triangles(triangles: &[Triangle]) -> AABB {
@@ -277,7 +299,7 @@ impl AABB {
     }
 
     fn subdivide(&self, dimension: usize) -> Vec<AABB> {
-        let size = self.max - self.min / (dimension as f32);
+        let size = (self.max - self.min) / (dimension as f32);
         let mut aabbs = Vec::new();
 
         for i in 0..dimension {
@@ -302,6 +324,7 @@ impl AABB {
     }
 }
 
+#[derive(Debug)]
 struct Octree {
     dimension: usize,
     aabbs: Vec<AABB>,
@@ -311,6 +334,7 @@ struct Octree {
 impl Octree {
     fn new(dimension: usize, triangles: Vec<Triangle>) -> Octree {
         let root_aabb = AABB::from_triangles(&triangles);
+        println!("Root AABB: {:?}", root_aabb);
         let aabbs = root_aabb.subdivide(dimension);
 
         // FIXME: Places triangles in correct AABB based on centroid location
@@ -324,6 +348,7 @@ impl Octree {
             for (i, aabb) in aabbs.iter().enumerate() {
                 if aabb.is_point_inside(centroid) {
                     aabb_triangles[i].push(triangle);
+                    break;
                 }
             }
         }
@@ -336,12 +361,19 @@ impl Octree {
     }
 
     fn intersects(&self, ray: &Ray) -> RaycastResult {
-        for aabb in &self.aabbs {
-            let res = aabb.intersects(ray);
-            match res {
-                RaycastResult::Hit { t, u, v } => res,
-                RaycastResult::Miss => continue,
-            };
+        for (i, aabb) in self.aabbs.iter().enumerate() {
+            let hit = aabb.intersects(ray);
+            if hit {
+                for triangle in &self.triangles[i] {
+                    let res = triangle.intersects(ray);
+                    match res {
+                        RaycastResult::Hit { t, u, v } => {
+                            return res;
+                        },
+                        _ => continue,
+                    };
+                }
+            }
         }
         RaycastResult::Miss
     }
@@ -353,41 +385,17 @@ struct Scene {
 
 impl Scene {
     fn new(path: &str) -> Scene {
-        // let mut triangles: Vec<Triangle> = Vec::new();
-        // triangles.push(Triangle {
-        //     v0: Vec3 {
-        //         x: 0.0,
-        //         y: 0.5,
-        //         z: 0.0,
-        //     },
-        //     v1: Vec3 {
-        //         x: -0.5,
-        //         y: 0.0,
-        //         z: 0.0,
-        //     },
-        //     v2: Vec3 {
-        //         x: 0.5,
-        //         y: 0.0,
-        //         z: 0.0,
-        //     },
-        // });
-        // Scene {
-        //     triangles: triangles,
-        // }
+        let start = std::time::Instant::now();
+        println!("Starting to load scene ...");
 
-        let dimension = 2;
+        let mut octrees = Vec::new();
 
         let obj = tobj::load_obj(&Path::new(path));
         assert!(obj.is_ok());
         let (models, materials) = obj.unwrap();
 
-        let start = std::time::Instant::now();
-        println!("Starting to load scene ...");
-
         println!("# of models: {}", models.len());
         println!("$ of materials: {}", materials.len());
-
-        let mut octrees = Vec::new();
 
         for (i, m) in models.iter().enumerate() {
             let mesh = &m.mesh;
@@ -438,6 +446,7 @@ impl Scene {
                 });
             }
 
+            let dimension = 4;
             octrees.push(Octree::new(dimension, triangles));
         }
 
@@ -464,10 +473,12 @@ impl Scene {
     }
 
     fn trace(&self, ray: &Ray) -> Vec3 {
-        for octree in &self.octrees {
+        for (i, octree) in self.octrees.iter().enumerate() {
             let res = octree.intersects(&ray);
             match res {
-                RaycastResult::Hit { t, u, v } => return Vec3::new(0.5),
+                RaycastResult::Hit { t, u, v } => {
+                    return Vec3::new(0.5)
+                },
                 RaycastResult::Miss => continue,
             };
         }
