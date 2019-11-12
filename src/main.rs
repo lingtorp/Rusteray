@@ -1,15 +1,18 @@
 extern crate minifb;
+use minifb::{Key, Window, WindowOptions};
 
-use std::path::Path;
 extern crate tobj;
+use std::path::Path;
+
+extern crate rand;
+use rand::prelude::*;
 
 mod linalg;
 use linalg::Vec3;
 
-use minifb::{Key, Window, WindowOptions};
-
 const WINDOW_WIDTH: usize = 400;
 const WINDOW_HEIGHT: usize = 400;
+const SAMPLE_COUNT: usize = 1;
 
 struct Camera {
     frame_anchor: Vec3,
@@ -364,7 +367,6 @@ impl AABB {
                         min: min,
                         max: min + size,
                     };
-                    println!("{:?}", aabb);
                     aabbs.push(aabb);
                 }
             }
@@ -394,7 +396,7 @@ struct Octree {
 impl Octree {
     fn new(dimension: usize, triangles: Vec<Triangle>) -> Octree {
         let root_aabb = AABB::from_triangles(&triangles);
-        println!("Root AABB: {:?}", root_aabb);
+        println!("Root AABB: {:?}, dimension: {}", root_aabb, dimension);
         let aabbs = root_aabb.subdivide(dimension);
 
         let mut aabb_triangles: Vec<Vec<Triangle>> = Vec::new();
@@ -518,7 +520,7 @@ impl Scene {
                 });
             }
 
-            let dimension = 4;
+            let dimension = 5;
             octrees.push(Octree::new(dimension, triangles));
         }
 
@@ -580,6 +582,7 @@ fn encode_color(encoding: Encoding, color: Vec3) -> u32 {
 }
 
 fn main() {
+    let mut rng = rand::thread_rng();
     let mut buffer: Vec<u32> = vec![0; WINDOW_WIDTH * WINDOW_HEIGHT];
 
     let mut window = Window::new(
@@ -593,10 +596,11 @@ fn main() {
     });
 
     let scene = Scene::new("/home/alexander/Desktop/models/rust_logo.obj");
+    // FIXME: From one axis does not work
     let from = Vec3 {
         x: 0.0,
-        y: 2.0,
-        z: 2.0,
+        y: 1.0,
+        z: 1.0,
     };
     let to = Vec3::zero();
     let camera = Camera::new(from, to);
@@ -606,14 +610,17 @@ fn main() {
 
         for x in 0..WINDOW_WIDTH {
             for y in 0..WINDOW_HEIGHT {
-                for s in 0..1 {
+                let mut color = Vec3::zero();
+                for _ in 0..SAMPLE_COUNT {
                     // Flipped view s.t y+ axis is up
-                    let s = (y as f32) / (WINDOW_WIDTH as f32);
-                    let t = (x as f32) / (WINDOW_HEIGHT as f32);
+                    let r: f32 = 0.0; // rng.gen();
+                    let s = ((y as f32) + r) / (WINDOW_WIDTH as f32);
+                    let t = ((x as f32) + r) / (WINDOW_HEIGHT as f32);
                     let ray = camera.ray(s, t);
-                    let color = scene.trace(&ray);
-                    buffer[x * WINDOW_WIDTH + y] = encode_color(Encoding::ARGB, color);
+                    color = color + scene.trace(&ray);
                 }
+                color = color / (SAMPLE_COUNT as f32);
+                buffer[x * WINDOW_WIDTH + y] = encode_color(Encoding::ARGB, color);
             }
         }
 
