@@ -73,6 +73,12 @@ struct Ray {
     pub direction: Vec3,
 }
 
+impl Ray {
+    fn at(&self, t: f32) -> Vec3 {
+        self.origin + t * self.direction
+    }
+}
+
 #[derive(Debug, Default, Clone, Copy)]
 struct Triangle {
     v0: Vec3,
@@ -151,7 +157,7 @@ impl AABB {
         let max = (self.max - ray.origin) / ray.direction;
 
         let mut tmin = 0.001;
-        let mut tmax = std::f32::MAX; 
+        let mut tmax = std::f32::MAX;
 
         {
             let t0 = fmin(min.x, max.x);
@@ -292,8 +298,8 @@ impl AABB {
         {
             let normal = (t.v0 - t.v1).cross(t.v0 - t.v2);
 
-            let center  = (self.min + self.max) * 0.5; // AABB center
-            let extents = self.max - center;           // Positive extents
+            let center = (self.min + self.max) * 0.5; // AABB center
+            let extents = self.max - center; // Positive extents
             let radius = extents.dot(normal.abs());
 
             // Compute distance of AABB from plane
@@ -306,9 +312,13 @@ impl AABB {
         // 9 tests - axis formed from edges of
         {
             // Compute edges of translated triangle
-            let c  = (self.min + self.max) * 0.5; // AABB center
-            let h = self.max - c;                 // +Half-vector
-            let edges = vec![t.v0 - t.v1 - (2.0 * c), t.v0 - t.v2 - (2.0 * c), t.v1 - t.v2 - (2.0 * c)];
+            let c = (self.min + self.max) * 0.5; // AABB center
+            let h = self.max - c; // +Half-vector
+            let edges = vec![
+                t.v0 - t.v1 - (2.0 * c),
+                t.v0 - t.v2 - (2.0 * c),
+                t.v1 - t.v2 - (2.0 * c),
+            ];
             let translated = vec![t.v0 - c, t.v1 - c, t.v2 - c];
             for i in 0..3 {
                 for j in 0..3 {
@@ -380,10 +390,26 @@ fn project(points: &[Vec3], on: Vec3) -> (f32, f32) {
     let mut min = std::f32::MAX;
     for point in points {
         let t = point.dot(on);
-        if t < min { min = t; }
-        if t > max { max = t; }
+        if t < min {
+            min = t;
+        }
+        if t > max {
+            max = t;
+        }
     }
     (min, max)
+}
+
+// NOTE: Phong reflection model as described by the .MTL format
+#[derive(Debug, Clone, Copy)]
+struct Material {
+    diffuse: Vec3,
+}
+
+impl Material {
+    fn shade(&self, p: Vec3) -> Vec3 {
+        self.diffuse
+    }
 }
 
 #[derive(Debug)]
@@ -391,10 +417,11 @@ struct Octree {
     dimension: usize,
     aabbs: Vec<AABB>,
     triangles: Vec<Vec<Triangle>>,
+    material: Material,
 }
 
 impl Octree {
-    fn new(dimension: usize, triangles: Vec<Triangle>) -> Octree {
+    fn new(dimension: usize, triangles: Vec<Triangle>, material: Material) -> Octree {
         let root_aabb = AABB::from_triangles(&triangles);
         println!("Root AABB: {:?}, dimension: {}", root_aabb, dimension);
         let aabbs = root_aabb.subdivide(dimension);
@@ -404,7 +431,6 @@ impl Octree {
             aabb_triangles.push(Vec::new());
         }
 
-        // FIXME: Places triangles in correct AABB based on centroid location
         for triangle in triangles {
             let mut did_fit_aabb = false;
             let triangle_aabb = AABB::from_triangles(&vec![triangle]);
@@ -431,6 +457,7 @@ impl Octree {
             dimension: dimension,
             aabbs: aabbs,
             triangles: aabb_triangles,
+            material: material,
         }
     }
 
@@ -442,8 +469,8 @@ impl Octree {
                     let res = triangle.intersects(ray);
                     match res {
                         RaycastResult::Hit { t, u, v } => {
-                            return res;
-                        },
+                            return RaycastResult::Hit { t, u, v };
+                        }
                         _ => continue,
                     };
                 }
@@ -484,11 +511,12 @@ impl Scene {
 
             println!("model[{}].triangles: {}", i, mesh.indices.len() / 3);
 
-            assert!(!mesh.normals.is_empty(), "Model lacks normals.");
-            assert!(
-                !mesh.texcoords.is_empty(),
-                "Model lacks texture coordinates."
-            );
+            // assert!(
+            //     !mesh.texcoords.is_empty(),
+            //     "Model lacks texture coordinates."
+            // );
+
+            let compute_normals = mesh.normals.is_empty();
 
             let mut triangles = Vec::new();
             for idxs in mesh.indices.chunks(3) {
@@ -502,12 +530,18 @@ impl Scene {
                 }
 
                 let mut n = [Vec3::default(); 3];
-                for i in 0..3 {
-                    let idx = idxs[i] as usize;
-                    let x = mesh.normals[3 * idx];
-                    let y = mesh.normals[3 * idx + 1];
-                    let z = mesh.normals[3 * idx + 2];
-                    n[i] = Vec3 { x: x, y: y, z: z }
+                if compute_normals {
+                    n[0] = (v[0] - v[1]).normalize();
+                    n[1] = n[0];
+                    n[2] = n[0];
+                } else {
+                    for i in 0..3 {
+                        let idx = idxs[i] as usize;
+                        let x = mesh.normals[3 * idx];
+                        let y = mesh.normals[3 * idx + 1];
+                        let z = mesh.normals[3 * idx + 2];
+                        n[i] = Vec3 { x: x, y: y, z: z }
+                    }
                 }
 
                 triangles.push(Triangle {
@@ -520,8 +554,45 @@ impl Scene {
                 });
             }
 
-            let dimension = 5;
-            octrees.push(Octree::new(dimension, triangles));
+            let mut material = Material {
+                diffuse: Vec3::zero(),
+            };
+            if i < materials.len() - 1 {
+                material.diffuse = Vec3 {
+                    x: materials[i].diffuse[0],
+                    y: materials[i].diffuse[1],
+                    z: materials[i].diffuse[2],
+                };
+            }
+
+            let dimension = 1;
+            octrees.push(Octree::new(dimension, triangles, material));
+        }
+
+        for (i, m) in materials.iter().enumerate() {
+            println!("material[{}].name = \'{}\'", i, m.name);
+            println!(
+                "    material.Ka = ({}, {}, {})",
+                m.ambient[0], m.ambient[1], m.ambient[2]
+            );
+            println!(
+                "    material.Kd = ({}, {}, {})",
+                m.diffuse[0], m.diffuse[1], m.diffuse[2]
+            );
+            println!(
+                "    material.Ks = ({}, {}, {})",
+                m.specular[0], m.specular[1], m.specular[2]
+            );
+            println!("    material.Ns = {}", m.shininess);
+            println!("    material.d = {}", m.dissolve);
+            println!("    material.map_Ka = {}", m.ambient_texture);
+            println!("    material.map_Kd = {}", m.diffuse_texture);
+            println!("    material.map_Ks = {}", m.specular_texture);
+            println!("    material.map_Ns = {}", m.normal_texture);
+            println!("    material.map_d = {}", m.dissolve_texture);
+            for (k, v) in &m.unknown_param {
+                println!("    material.{} = {}", k, v);
+            }
         }
 
         let end = std::time::Instant::now();
@@ -551,8 +622,9 @@ impl Scene {
             let res = octree.intersects(&ray);
             match res {
                 RaycastResult::Hit { t, u, v } => {
-                    return Vec3::new(0.5)
-                },
+                    let p = ray.at(t);
+                    return octree.material.shade(p);
+                }
                 RaycastResult::Miss => continue,
             };
         }
@@ -595,14 +667,20 @@ fn main() {
         panic!("{}", e);
     });
 
-    let scene = Scene::new("/home/alexander/Desktop/models/rust_logo.obj");
+    // let filepath = "/home/alexander/Desktop/models/rust_logo.obj";
+    let filepath = "/home/alexander/repos/Rusteray/models/cornell_box/cornell_box.obj";
+    let scene = Scene::new(filepath);
     // FIXME: From one axis does not work
     let from = Vec3 {
         x: 0.0,
         y: 1.0,
-        z: 1.0,
+        z: 3.0,
     };
-    let to = Vec3::zero();
+    let to = Vec3 {
+        x: 0.0,
+        y: 0.5,
+        z: 0.0,
+    };
     let camera = Camera::new(from, to);
 
     while window.is_open() && !window.is_key_down(Key::Escape) {

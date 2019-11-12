@@ -42,7 +42,7 @@ impl Vec3 {
         Vec3 {
             x: self.x.abs(),
             y: self.y.abs(),
-            z: self.z.abs()
+            z: self.z.abs(),
         }
     }
 
@@ -81,7 +81,7 @@ impl std::ops::Div<Vec3> for Vec3 {
         Vec3 {
             x: self.x / rhs.x,
             y: self.y / rhs.y,
-            z: self.z / rhs.z
+            z: self.z / rhs.z,
         }
     }
 }
