@@ -13,6 +13,7 @@ use linalg::Vec3;
 const WINDOW_WIDTH: usize = 400;
 const WINDOW_HEIGHT: usize = 400;
 const SAMPLE_COUNT: usize = 1;
+const RAY_DEPTH_MAX: usize = 2;
 
 struct Camera {
     frame_anchor: Vec3,
@@ -57,6 +58,7 @@ impl Camera {
         Ray {
             origin: self.position,
             direction: d,
+            depth: 0,
         }
     }
 }
@@ -64,13 +66,14 @@ impl Camera {
 #[derive(Debug)]
 enum RaycastResult {
     Miss,
-    Hit { t: f32, u: f32, v: f32 },
+    Hit { t: f32, u: f32, v: f32, triangle: Triangle },
 }
 
 #[derive(Debug)]
 struct Ray {
     pub origin: Vec3,
     pub direction: Vec3,
+    pub depth: usize,
 }
 
 impl Ray {
@@ -116,7 +119,11 @@ impl Triangle {
         }
 
         let t = f * (e2.dot(r));
-        RaycastResult::Hit { t, u, v }
+        RaycastResult::Hit { t, u, v, triangle: *self }
+    }
+
+    fn normal_at(&self, u: f32, v: f32) -> Vec3 {
+        ((1.0 - u - v) * self.n0 + u * self.n1 + v * self.n2).normalize()
     }
 
     fn centroid(&self) -> Vec3 {
@@ -407,8 +414,21 @@ struct Material {
 }
 
 impl Material {
-    fn shade(&self, p: Vec3) -> Vec3 {
-        self.diffuse
+    fn shade(&self, scene: &Scene, ray: Ray, t: f32, u: f32, v: f32, triangle: Triangle) -> Vec3 {
+        if ray.depth == RAY_DEPTH_MAX {
+            return self.diffuse
+        }
+
+        let n = triangle.normal_at(u, v);
+        let r = ray.direction.reflect(n);
+
+        let next_ray = Ray {
+            origin: ray.at(t),
+            direction: r,
+            depth: ray.depth + 1,
+        };
+
+        self.diffuse + 0.25 * scene.trace(next_ray)
     }
 }
 
@@ -465,11 +485,12 @@ impl Octree {
         for (i, aabb) in self.aabbs.iter().enumerate() {
             let hit = aabb.intersects(ray);
             if hit {
+                // FIXME: Pick closest triangle hit instead?
                 for triangle in &self.triangles[i] {
                     let res = triangle.intersects(ray);
                     match res {
-                        RaycastResult::Hit { t, u, v } => {
-                            return RaycastResult::Hit { t, u, v };
+                        RaycastResult::Hit { t, u, v, triangle } => {
+                            return RaycastResult::Hit { t, u, v, triangle };
                         }
                         _ => continue,
                     };
@@ -606,7 +627,7 @@ impl Scene {
         Scene { octrees: octrees }
     }
 
-    fn trace_background(&self, ray: &Ray) -> Vec3 {
+    fn trace_background(&self, ray: Ray) -> Vec3 {
         let t = ray.direction.y.abs();
         let white = Vec3::new(1.0);
         let light_blue = Vec3 {
@@ -617,13 +638,12 @@ impl Scene {
         ((1.0 - t) * white + t * light_blue)
     }
 
-    fn trace(&self, ray: &Ray) -> Vec3 {
-        for (i, octree) in self.octrees.iter().enumerate() {
+    fn trace(&self, ray: Ray) -> Vec3 {
+        for octree in &self.octrees {
             let res = octree.intersects(&ray);
             match res {
-                RaycastResult::Hit { t, u, v } => {
-                    let p = ray.at(t);
-                    return octree.material.shade(p);
+                RaycastResult::Hit { t, u, v, triangle } => {
+                    return octree.material.shade(&self, ray, t, u, v, triangle);
                 }
                 RaycastResult::Miss => continue,
             };
@@ -695,7 +715,7 @@ fn main() {
                     let s = ((y as f32) + r) / (WINDOW_WIDTH as f32);
                     let t = ((x as f32) + r) / (WINDOW_HEIGHT as f32);
                     let ray = camera.ray(s, t);
-                    color = color + scene.trace(&ray);
+                    color = color + scene.trace(ray);
                 }
                 color = color / (SAMPLE_COUNT as f32);
                 buffer[x * WINDOW_WIDTH + y] = encode_color(Encoding::ARGB, color);

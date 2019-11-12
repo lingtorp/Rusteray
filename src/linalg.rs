@@ -38,6 +38,11 @@ impl Vec3 {
         }
     }
 
+    // NOTE: Assumes that the normal is normalized
+    pub fn reflect(self, n: Vec3) -> Vec3 {
+        self - 2.0 * (self.dot(n)) * n
+    }
+
     pub fn abs(&self) -> Vec3 {
         Vec3 {
             x: self.x.abs(),
