@@ -32,8 +32,8 @@ impl Camera {
         let wup = Vec3::y();
         let dir = (from - to).normalize();
 
-        let u = dir.cross(&wup).normalize();
-        let v = dir.cross(&u).normalize();
+        let u = dir.cross(wup).normalize();
+        let v = dir.cross(u).normalize();
 
         let horizontal = (2.0 * half_width) * u;
         let vertical = (2.0 * half_height) * v;
@@ -85,28 +85,28 @@ impl Triangle {
     fn intersects(&self, ray: &Ray) -> RaycastResult {
         let e1 = self.v1 - self.v0;
         let e2 = self.v2 - self.v0;
-        let q = ray.direction.cross(&e2);
+        let q = ray.direction.cross(e2);
 
-        let a = e1.dot(&q);
+        let a = e1.dot(q);
         if a < std::f32::EPSILON && a > std::f32::EPSILON {
             return RaycastResult::Miss;
         }
 
         let f = 1.0 / a;
         let s = ray.origin - self.v0;
-        let u = f * (s.dot(&q));
+        let u = f * (s.dot(q));
 
         if u < 0.0 {
             return RaycastResult::Miss;
         }
 
-        let r = s.cross(&e1);
-        let v = f * (ray.direction.dot(&r));
+        let r = s.cross(e1);
+        let v = f * (ray.direction.dot(r));
         if v < 0.0 || u + v > 1.0 {
             return RaycastResult::Miss;
         }
 
-        let t = f * (e2.dot(&r));
+        let t = f * (e2.dot(r));
         RaycastResult::Hit { t, u, v }
     }
 
@@ -269,6 +269,62 @@ impl AABB {
         }
     }
 
+    // Based on the separating axis theorem (SAT) and Mr. Akenine-Möller himself and ref #2
+    // Reference 1 [p. 2]: http://fileadmin.cs.lth.se/cs/Personal/Tomas_Akenine-Moller/pubs/tribox.pdf
+    // Referens  2: https://stackoverflow.com/questions/17458562/efficient-aabb-triangle-intersection-in-c-sharp
+    fn intersects_triangle(&self, t: Triangle) -> bool {
+        let aabb_normals = vec![Vec3::x(), Vec3::y(), Vec3::z()];
+        let mins = vec![self.min.x, self.min.y, self.min.z];
+        let maxs = vec![self.max.x, self.max.y, self.max.z];
+
+        // 3 tests - AABBs normals
+        for i in 0..3 {
+            let (min, max) = project(&[t.v0, t.v1, t.v2], aabb_normals[i]);
+            if max <= mins[i] || min >= maxs[i] {
+                return false;
+            }
+        }
+
+        // 1 test - triangle normal/plane vs. AABB intersection
+        {
+            let normal = (t.v0 - t.v1).cross(t.v0 - t.v2);
+
+            let center  = (self.min + self.max) * 0.5; // AABB center
+            let extents = self.max - center;           // Positive extents
+            let radius = extents.dot(normal.abs());
+
+            // Compute distance of AABB from plane
+            let distance = normal.dot(center);
+            if distance <= radius {
+                return false;
+            }
+        }
+
+        // 9 tests - axis formed from edges of
+        {
+            // Compute edges of translated triangle
+            let c  = (self.min + self.max) * 0.5; // AABB center
+            let h = self.max - c;                 // +Half-vector
+            let edges = vec![t.v0 - t.v1 - (2.0 * c), t.v0 - t.v2 - (2.0 * c), t.v1 - t.v2 - (2.0 * c)];
+            let translated = vec![t.v0 - c, t.v1 - c, t.v2 - c];
+            for i in 0..3 {
+                for j in 0..3 {
+                    let axis = edges[i].cross(aabb_normals[j]);
+                    let r = h.dot(axis.abs());
+                    let (t_min, t_max) = project(&translated, axis);
+                    if t_min > r || t_max < -r {
+                        return false;
+                    }
+                }
+            }
+        }
+        true
+    }
+
+    fn is_aabb_inside(&self, aabb: &AABB) -> bool {
+        self.is_point_inside(aabb.min) && self.is_point_inside(aabb.max)
+    }
+
     fn is_point_inside(&self, p: Vec3) -> bool {
         if p.x > self.max.x {
             return false;
@@ -317,6 +373,17 @@ impl AABB {
     }
 }
 
+fn project(points: &[Vec3], on: Vec3) -> (f32, f32) {
+    let mut max = std::f32::MIN;
+    let mut min = std::f32::MAX;
+    for point in points {
+        let t = point.dot(on);
+        if t < min { min = t; }
+        if t > max { max = t; }
+    }
+    (min, max)
+}
+
 #[derive(Debug)]
 struct Octree {
     dimension: usize,
@@ -330,18 +397,30 @@ impl Octree {
         println!("Root AABB: {:?}", root_aabb);
         let aabbs = root_aabb.subdivide(dimension);
 
-        // FIXME: Places triangles in correct AABB based on centroid location
         let mut aabb_triangles: Vec<Vec<Triangle>> = Vec::new();
         for _ in 0..dimension * dimension * dimension {
             aabb_triangles.push(Vec::new());
         }
 
+        // FIXME: Places triangles in correct AABB based on centroid location
         for triangle in triangles {
-            let centroid = triangle.centroid();
+            let mut did_fit_aabb = false;
+            let triangle_aabb = AABB::from_triangles(&vec![triangle]);
+
             for (i, aabb) in aabbs.iter().enumerate() {
-                if aabb.is_point_inside(centroid) {
+                if aabb.is_aabb_inside(&triangle_aabb) {
                     aabb_triangles[i].push(triangle);
+                    did_fit_aabb = true;
                     break;
+                }
+            }
+
+            if !did_fit_aabb {
+                // Add triangle to all AABBs that intersects it
+                for (i, aabb) in aabbs.iter().enumerate() {
+                    if aabb.intersects_triangle(triangle) {
+                        aabb_triangles[i].push(triangle);
+                    }
                 }
             }
         }
