@@ -441,7 +441,7 @@ impl Material {
             depth: ray.depth + 1,
         };
 
-        self.diffuse + 0.2 * scene.trace(next_ray)
+        self.diffuse + 0.25 * scene.trace(next_ray)
     }
 }
 
@@ -598,14 +598,12 @@ impl Scene {
                 diffuse: Vec3::zero(),
             };
 
-            if !materials.is_empty() {
-                if i < materials.len() - 1 {
-                    material.diffuse = Vec3 {
-                        x: materials[i].diffuse[0],
-                        y: materials[i].diffuse[1],
-                        z: materials[i].diffuse[2],
-                    };
-                }
+            if let Some(mid) = mesh.material_id {
+                material.diffuse = Vec3 {
+                    x: materials[mid].diffuse[0],
+                    y: materials[mid].diffuse[1],
+                    z: materials[mid].diffuse[2],
+                };
             }
 
             let dimension = 1;
