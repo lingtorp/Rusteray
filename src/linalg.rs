@@ -38,6 +38,10 @@ impl Vec3 {
         }
     }
 
+    pub fn lng(self) -> f32 {
+        self.dot(self).sqrt()
+    }
+
     // NOTE: Assumes that the normal is normalized
     pub fn reflect(self, n: Vec3) -> Vec3 {
         self - 2.0 * (self.dot(n)) * n

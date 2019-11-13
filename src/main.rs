@@ -20,14 +20,14 @@ struct Camera {
     u: Vec3,
     v: Vec3,
     position: Vec3,
+    fov: f32,
 }
 
 // TODO: Actual ray bouncing and material support
 
 impl Camera {
-    fn new(from: Vec3, to: Vec3) -> Camera {
-        let fov: f32 = 75.0;
-
+    // FoV in degrees
+    fn new(fov: f32, from: Vec3, to: Vec3) -> Camera {
         let aspect = (WINDOW_HEIGHT as f32) / (WINDOW_WIDTH as f32);
 
         let half_height = (fov.to_radians() / 2.0).tan();
@@ -39,8 +39,8 @@ impl Camera {
         let u = dir.cross(wup).normalize();
         let v = dir.cross(u).normalize();
 
-        let horizontal = (2.0 * half_width) * u;
-        let vertical = (2.0 * half_height) * v;
+        let horizontal = 2.0 * half_width * u;
+        let vertical = 2.0 * half_height * v;
 
         let frame_anchor = from - half_width * u - half_height * v - dir;
 
@@ -49,16 +49,17 @@ impl Camera {
             u: horizontal,
             v: vertical,
             position: from,
+            fov: fov
         }
     }
 
     // (s, t) screen based offsets
     fn ray(&self, s: f32, t: f32) -> Ray {
-        let d = self.frame_anchor + s * self.u + t * self.v - self.position;
+        let d = (self.frame_anchor + s * self.u + t * self.v - self.position).normalize();
         Ray {
             origin: self.position,
             direction: d,
-            depth: 0,
+            depth: 1,
         }
     }
 }
@@ -66,7 +67,12 @@ impl Camera {
 #[derive(Debug)]
 enum RaycastResult {
     Miss,
-    Hit { t: f32, u: f32, v: f32, triangle: Triangle },
+    Hit {
+        t: f32,
+        u: f32,
+        v: f32,
+        triangle: Triangle,
+    },
 }
 
 #[derive(Debug)]
@@ -119,7 +125,12 @@ impl Triangle {
         }
 
         let t = f * (e2.dot(r));
-        RaycastResult::Hit { t, u, v, triangle: *self }
+        RaycastResult::Hit {
+            t,
+            u,
+            v,
+            triangle: *self,
+        }
     }
 
     fn normal_at(&self, u: f32, v: f32) -> Vec3 {
@@ -416,11 +427,13 @@ struct Material {
 impl Material {
     fn shade(&self, scene: &Scene, ray: Ray, t: f32, u: f32, v: f32, triangle: Triangle) -> Vec3 {
         if ray.depth == RAY_DEPTH_MAX {
-            return self.diffuse
+            return self.diffuse;
         }
 
         let n = triangle.normal_at(u, v);
         let r = ray.direction.reflect(n);
+
+        // println!("i: {:?}, n: {:?}, r: {:?}", ray.direction, n, r);
 
         let next_ray = Ray {
             origin: ray.at(t),
@@ -428,7 +441,7 @@ impl Material {
             depth: ray.depth + 1,
         };
 
-        self.diffuse + 0.25 * scene.trace(next_ray)
+        self.diffuse + 0.2 * scene.trace(next_ray)
     }
 }
 
@@ -482,22 +495,27 @@ impl Octree {
     }
 
     fn intersects(&self, ray: &Ray) -> RaycastResult {
+        let mut t0 = std::f32::MAX;
+        let mut result = RaycastResult::Miss;
+        // FIXME: Searching for ALL triangles hits in the AABBs
         for (i, aabb) in self.aabbs.iter().enumerate() {
             let hit = aabb.intersects(ray);
             if hit {
-                // FIXME: Pick closest triangle hit instead?
                 for triangle in &self.triangles[i] {
                     let res = triangle.intersects(ray);
                     match res {
                         RaycastResult::Hit { t, u, v, triangle } => {
-                            return RaycastResult::Hit { t, u, v, triangle };
+                            if t < t0 {
+                                result = res;
+                                t0 = t;
+                            }
                         }
                         _ => continue,
                     };
                 }
             }
         }
-        RaycastResult::Miss
+        result
     }
 }
 
@@ -552,7 +570,8 @@ impl Scene {
 
                 let mut n = [Vec3::default(); 3];
                 if compute_normals {
-                    n[0] = (v[0] - v[1]).normalize();
+                    let normal = (v[0] - v[1]).cross(v[0] - v[2]).normalize();
+                    n[0] = normal;
                     n[1] = n[0];
                     n[2] = n[0];
                 } else {
@@ -578,12 +597,15 @@ impl Scene {
             let mut material = Material {
                 diffuse: Vec3::zero(),
             };
-            if i < materials.len() - 1 {
-                material.diffuse = Vec3 {
-                    x: materials[i].diffuse[0],
-                    y: materials[i].diffuse[1],
-                    z: materials[i].diffuse[2],
-                };
+
+            if !materials.is_empty() {
+                if i < materials.len() - 1 {
+                    material.diffuse = Vec3 {
+                        x: materials[i].diffuse[0],
+                        y: materials[i].diffuse[1],
+                        z: materials[i].diffuse[2],
+                    };
+                }
             }
 
             let dimension = 1;
@@ -698,34 +720,53 @@ fn main() {
     };
     let to = Vec3 {
         x: 0.0,
-        y: 0.5,
+        y: 1.0,
         z: 0.0,
     };
-    let camera = Camera::new(from, to);
+    let mut camera = Camera::new(50.0, from, to);
 
     while window.is_open() && !window.is_key_down(Key::Escape) {
+        // Input handling
+        if window.is_key_down(Key::W) {
+            camera = Camera::new(camera.fov, camera.position + Vec3{x: 0.0, y: 0.1, z: 0.0}, to);
+        }
+
+        if window.is_key_down(Key::A) {
+            camera = Camera::new(camera.fov, camera.position + Vec3{x: -0.1, y: 0.0, z: 0.0}, to);
+        }
+
+        if window.is_key_down(Key::S) {
+            camera = Camera::new(camera.fov, camera.position + Vec3{x: 0.0, y: -0.1, z: 0.0}, to);
+        }
+
+        if window.is_key_down(Key::D) {
+            camera = Camera::new(camera.fov, camera.position + Vec3{x: 0.1, y: 0.0, z: 0.0}, to);
+        }
+
         let start = std::time::Instant::now();
 
         for x in 0..WINDOW_WIDTH {
             for y in 0..WINDOW_HEIGHT {
                 let mut color = Vec3::zero();
                 for _ in 0..SAMPLE_COUNT {
-                    // Flipped view s.t y+ axis is up
+                    // Flipped variable t s.t y+ axis is up
                     let r: f32 = 0.0; // rng.gen();
-                    let s = ((y as f32) + r) / (WINDOW_WIDTH as f32);
-                    let t = ((x as f32) + r) / (WINDOW_HEIGHT as f32);
+                    let s = ((x as f32) + r) / (WINDOW_WIDTH as f32);
+                    let t = ((y as f32) + r) / (WINDOW_HEIGHT as f32);
                     let ray = camera.ray(s, t);
                     color = color + scene.trace(ray);
                 }
                 color = color / (SAMPLE_COUNT as f32);
-                buffer[x * WINDOW_WIDTH + y] = encode_color(Encoding::ARGB, color);
+                buffer[y * WINDOW_WIDTH + x] = encode_color(Encoding::ARGB, color);
+
+                // std::thread::sleep(std::time::Duration::from_millis(50));
             }
         }
 
         let end = std::time::Instant::now();
         let diff = end - start;
         println!(
-            "Frame rendered in: {}.{} secs",
+            "Frame rendered in: {}.{} s",
             diff.as_secs(),
             diff.subsec_millis()
         );
