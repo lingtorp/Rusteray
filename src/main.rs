@@ -49,7 +49,7 @@ impl Camera {
             u: horizontal,
             v: vertical,
             position: from,
-            fov: fov
+            fov: fov,
         }
     }
 
@@ -422,12 +422,13 @@ fn project(points: &[Vec3], on: Vec3) -> (f32, f32) {
 #[derive(Debug, Clone, Copy)]
 struct Material {
     diffuse: Vec3,
+    emission: Vec3,
 }
 
 impl Material {
     fn shade(&self, scene: &Scene, ray: Ray, t: f32, u: f32, v: f32, triangle: Triangle) -> Vec3 {
         if ray.depth == RAY_DEPTH_MAX {
-            return self.diffuse;
+            return self.emission + self.diffuse;
         }
 
         let n = triangle.normal_at(u, v);
@@ -441,7 +442,7 @@ impl Material {
             depth: ray.depth + 1,
         };
 
-        self.diffuse + 0.25 * scene.trace(next_ray)
+        self.emission + self.diffuse + 0.1 * scene.trace(next_ray)
     }
 }
 
@@ -596,6 +597,7 @@ impl Scene {
 
             let mut material = Material {
                 diffuse: Vec3::zero(),
+                emission: Vec3::zero(),
             };
 
             if let Some(mid) = mesh.material_id {
@@ -604,6 +606,25 @@ impl Scene {
                     y: materials[mid].diffuse[1],
                     z: materials[mid].diffuse[2],
                 };
+
+                if let emission = &materials[mid].unknown_param["Ke"] {
+                    let strs = emission.split(" ").collect::<Vec<_>>();
+                    if strs.len() == 3 {
+                        let mut e = vec![0.0; 3];
+
+                        for (i, s) in strs.iter().enumerate() {
+                            if let Ok(num) = s.parse::<f32>() {
+                                e[i] = num;
+                            }
+                        }
+
+                        material.emission = Vec3 {
+                            x: e[0],
+                            y: e[1],
+                            z: e[2],
+                        };
+                    }
+                }
             }
 
             let dimension = 1;
@@ -632,7 +653,7 @@ impl Scene {
             println!("    material.map_Ns = {}", m.normal_texture);
             println!("    material.map_d = {}", m.dissolve_texture);
             for (k, v) in &m.unknown_param {
-                println!("    material.{} = {}", k, v);
+                println!("    unknown - material.{} = {}", k, v);
             }
         }
 
@@ -726,19 +747,55 @@ fn main() {
     while window.is_open() && !window.is_key_down(Key::Escape) {
         // Input handling
         if window.is_key_down(Key::W) {
-            camera = Camera::new(camera.fov, camera.position + Vec3{x: 0.0, y: 0.1, z: 0.0}, to);
+            camera = Camera::new(
+                camera.fov,
+                camera.position
+                    + Vec3 {
+                        x: 0.0,
+                        y: 0.1,
+                        z: 0.0,
+                    },
+                to,
+            );
         }
 
         if window.is_key_down(Key::A) {
-            camera = Camera::new(camera.fov, camera.position + Vec3{x: -0.1, y: 0.0, z: 0.0}, to);
+            camera = Camera::new(
+                camera.fov,
+                camera.position
+                    + Vec3 {
+                        x: -0.1,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                to,
+            );
         }
 
         if window.is_key_down(Key::S) {
-            camera = Camera::new(camera.fov, camera.position + Vec3{x: 0.0, y: -0.1, z: 0.0}, to);
+            camera = Camera::new(
+                camera.fov,
+                camera.position
+                    + Vec3 {
+                        x: 0.0,
+                        y: -0.1,
+                        z: 0.0,
+                    },
+                to,
+            );
         }
 
         if window.is_key_down(Key::D) {
-            camera = Camera::new(camera.fov, camera.position + Vec3{x: 0.1, y: 0.0, z: 0.0}, to);
+            camera = Camera::new(
+                camera.fov,
+                camera.position
+                    + Vec3 {
+                        x: 0.1,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                to,
+            );
         }
 
         let start = std::time::Instant::now();
