@@ -1,3 +1,35 @@
+
+extern crate rand;
+use rand_distr::{UnitSphere, Distribution};
+
+// TODO: Random point in positive unit hemisphere
+
+// Returns random point on the unit sphere's surface
+pub fn random_point_in_sphere() -> Vec3 {
+    let v: [f32; 3] = UnitSphere.sample(&mut rand::thread_rng());
+    Vec3 {
+        x: v[0],
+        y: v[1],
+        z: v[2],
+    }
+}
+
+pub fn fmin(t0: f32, t1: f32) -> f32 {
+    if t0 < t1 {
+        t0
+    } else {
+        t1
+    }
+}
+
+pub fn fmax(t0: f32, t1: f32) -> f32 {
+    if t0 > t1 {
+        t0
+    } else {
+        t1
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Vec3 {
     pub x: f32,

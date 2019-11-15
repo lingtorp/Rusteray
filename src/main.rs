@@ -152,22 +152,6 @@ struct AABB {
     max: Vec3,
 }
 
-fn fmin(t0: f32, t1: f32) -> f32 {
-    if t0 < t1 {
-        t0
-    } else {
-        t1
-    }
-}
-
-fn fmax(t0: f32, t1: f32) -> f32 {
-    if t0 > t1 {
-        t0
-    } else {
-        t1
-    }
-}
-
 impl AABB {
     // Intersection test using 3D slab-method
     fn intersects(&self, ray: &Ray) -> bool {
@@ -178,30 +162,30 @@ impl AABB {
         let mut tmax = std::f32::MAX;
 
         {
-            let t0 = fmin(min.x, max.x);
-            let t1 = fmax(min.x, max.x);
-            tmin = fmax(t0, tmin);
-            tmax = fmin(t1, tmax);
+            let t0 = linalg::fmin(min.x, max.x);
+            let t1 = linalg::fmax(min.x, max.x);
+            tmin = linalg::fmax(t0, tmin);
+            tmax = linalg::fmin(t1, tmax);
             if tmax < tmin {
                 return false;
             }
         }
 
         {
-            let t0 = fmin(min.y, max.y);
-            let t1 = fmax(min.y, max.y);
-            tmin = fmax(t0, tmin);
-            tmax = fmin(t1, tmax);
+            let t0 = linalg::fmin(min.y, max.y);
+            let t1 = linalg::fmax(min.y, max.y);
+            tmin = linalg::fmax(t0, tmin);
+            tmax = linalg::fmin(t1, tmax);
             if tmax < tmin {
                 return false;
             }
         }
 
         {
-            let t0 = fmin(min.z, max.z);
-            let t1 = fmax(min.z, max.z);
-            tmin = fmax(t0, tmin);
-            tmax = fmin(t1, tmax);
+            let t0 = linalg::fmin(min.z, max.z);
+            let t1 = linalg::fmax(min.z, max.z);
+            tmin = linalg::fmax(t0, tmin);
+            tmax = linalg::fmin(t1, tmax);
             if tmax < tmin {
                 return false;
             }
