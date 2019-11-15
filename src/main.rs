@@ -796,7 +796,7 @@ fn main() {
                     color = color + scene.trace(ray);
                 }
                 color = color / (SAMPLE_COUNT as f32);
-                buffer[y * WINDOW_WIDTH + x] = encode_color(Encoding::ARGB, color);
+                buffer[y * WINDOW_WIDTH + (WINDOW_WIDTH - x - 1)] = encode_color(Encoding::ARGB, color);
 
                 // std::thread::sleep(std::time::Duration::from_millis(50));
             }
