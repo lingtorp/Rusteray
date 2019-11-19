@@ -1,6 +1,5 @@
-
 extern crate rand;
-use rand_distr::{UnitSphere, Distribution};
+use rand_distr::{Distribution, UnitSphere};
 
 // TODO: Random point in positive unit hemisphere
 
@@ -38,6 +37,14 @@ pub struct Vec3 {
 }
 
 impl Vec3 {
+    pub fn new_from(v: Vec3) -> Vec3 {
+        Vec3 {
+            x: v.x,
+            y: v.y,
+            z: v.z,
+        }
+    }
+
     pub fn new(s: f32) -> Vec3 {
         Vec3 { x: s, y: s, z: s }
     }
@@ -105,6 +112,18 @@ impl Vec3 {
             x: self.y * v.z - self.z * v.y,
             y: self.z * v.x - self.x * v.z,
             z: self.x * v.y - self.y * v.x,
+        }
+    }
+}
+
+impl std::ops::Neg for Vec3 {
+    type Output = Vec3;
+
+    fn neg(self) -> Vec3 {
+        Vec3 {
+            x: -self.x,
+            y: -self.y,
+            z: -self.z,
         }
     }
 }
