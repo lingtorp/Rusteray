@@ -10,10 +10,10 @@ use rand::prelude::*;
 mod linalg;
 use linalg::Vec3;
 
-const WINDOW_WIDTH: usize = 400;
-const WINDOW_HEIGHT: usize = 400;
-const SAMPLE_COUNT: usize = 1;
-const RAY_DEPTH_MAX: usize = 2;
+const WINDOW_WIDTH: usize = 1000;
+const WINDOW_HEIGHT: usize = 1000;
+const SAMPLE_COUNT: usize = 100;
+const RAY_DEPTH_MAX: usize = 20;
 
 struct Camera {
     frame_anchor: Vec3,
@@ -23,14 +23,11 @@ struct Camera {
     fov: f32,
 }
 
-// TODO: Actual ray bouncing and material support
-
 impl Camera {
-    // FoV in degrees
-    fn new(fov: f32, from: Vec3, to: Vec3) -> Camera {
-        let aspect = (WINDOW_HEIGHT as f32) / (WINDOW_WIDTH as f32);
+    fn new(fov_degrees: f32, from: Vec3, to: Vec3) -> Camera {
+        let aspect = (WINDOW_WIDTH as f32) / (WINDOW_HEIGHT as f32);
 
-        let half_height = (fov.to_radians() / 2.0).tan();
+        let half_height = (fov_degrees.to_radians() / 2.0).tan();
         let half_width = aspect * half_height;
 
         let wup = Vec3::y();
@@ -49,7 +46,7 @@ impl Camera {
             u: horizontal,
             v: vertical,
             position: from,
-            fov: fov,
+            fov: fov_degrees,
         }
     }
 
@@ -106,7 +103,7 @@ impl Triangle {
         let q = ray.direction.cross(e2);
 
         let a = e1.dot(q);
-        if a < std::f32::EPSILON && a > std::f32::EPSILON {
+        if a < std::f32::EPSILON && a > -std::f32::EPSILON {
             return RaycastResult::Miss;
         }
 
@@ -125,6 +122,12 @@ impl Triangle {
         }
 
         let t = f * (e2.dot(r));
+
+        if t < 0.0 {
+            // println!("t < 0 in ray-triangle intersection");
+            return RaycastResult::Miss;
+        }
+
         RaycastResult::Hit {
             t,
             u,
@@ -153,12 +156,12 @@ struct AABB {
 }
 
 impl AABB {
-    // Intersection test using 3D slab-method
+    // AABB-Ray intersection test using 3D slab-method
     fn intersects(&self, ray: &Ray) -> bool {
         let min = (self.min - ray.origin) / ray.direction;
         let max = (self.max - ray.origin) / ray.direction;
 
-        let mut tmin = 0.001;
+        let mut tmin = std::f32::MIN;
         let mut tmax = std::f32::MAX;
 
         {
@@ -410,23 +413,40 @@ struct Material {
 }
 
 impl Material {
+    fn new() -> Material {
+        Material {
+            diffuse: Vec3::zero(),
+            emission: Vec3::zero(),
+        }
+    }
+
+    // FIXME: Lambertian diffuse FRAC_1_PI factor missing, perhaps?
     fn shade(&self, scene: &Scene, ray: Ray, t: f32, u: f32, v: f32, triangle: Triangle) -> Vec3 {
         if ray.depth == RAY_DEPTH_MAX {
             return self.emission + self.diffuse;
         }
 
         let n = triangle.normal_at(u, v);
-        let r = ray.direction.reflect(n);
-
-        // println!("i: {:?}, n: {:?}, r: {:?}", ray.direction, n, r);
+        let random = linalg::random_point_in_sphere();
+        let d = (ray.at(t) + n + random).normalize(); // FIXME: Is this really correct?
 
         let next_ray = Ray {
-            origin: ray.at(t),
-            direction: r,
+            origin: ray.at(t) + (d * Vec3::new(0.0001)),
+            direction: d,
             depth: ray.depth + 1,
         };
 
-        self.emission + self.diffuse + 0.1 * scene.trace(next_ray)
+        // FIXME: Flip reflected ray if hit on the backface of the triangle? What to do here?
+        let incoming = -ray.direction;
+        let cos_theta = incoming.dot(next_ray.direction);
+        if cos_theta < 0.0 {
+            // println!("Cos theta! from: {:?} dir: {:?}", next_ray.origin, d);
+            // cos_theta = cos_theta + 1.0;
+            // next_ray.direction = -next_ray.direction;
+            return Vec3::new(0.0);
+        }
+
+        self.emission + self.diffuse * scene.trace(next_ray)
     }
 }
 
@@ -482,15 +502,14 @@ impl Octree {
     fn intersects(&self, ray: &Ray) -> RaycastResult {
         let mut t0 = std::f32::MAX;
         let mut result = RaycastResult::Miss;
-        // FIXME: Searching for ALL triangles hits in the AABBs
+        // FIXME: Searching for ALL triangles hits in the AABBs measure AABB intersection t
         for (i, aabb) in self.aabbs.iter().enumerate() {
-            let hit = aabb.intersects(ray);
-            if hit {
+            if aabb.intersects(ray) {
                 for triangle in &self.triangles[i] {
                     let res = triangle.intersects(ray);
                     match res {
                         RaycastResult::Hit { t, u, v, triangle } => {
-                            if t < t0 {
+                            if t < t0 && t > std::f32::EPSILON {
                                 result = res;
                                 t0 = t;
                             }
@@ -535,12 +554,10 @@ impl Scene {
 
             println!("model[{}].triangles: {}", i, mesh.indices.len() / 3);
 
-            // assert!(
-            //     !mesh.texcoords.is_empty(),
-            //     "Model lacks texture coordinates."
-            // );
-
             let compute_normals = mesh.normals.is_empty();
+            if compute_normals {
+                println!("Computing normals!");
+            }
 
             let mut triangles = Vec::new();
             for idxs in mesh.indices.chunks(3) {
@@ -553,12 +570,14 @@ impl Scene {
                     v[i] = Vec3 { x: x, y: y, z: z }
                 }
 
-                let mut n = [Vec3::default(); 3];
+                let mut n = [Vec3::zero(); 3];
                 if compute_normals {
+                    // FIXME: Must consider winding order of vertices when computing this
                     let normal = (v[0] - v[1]).cross(v[0] - v[2]).normalize();
                     n[0] = normal;
                     n[1] = n[0];
                     n[2] = n[0];
+                    println!("-- COMPUTED NORMAL: {:?}", normal);
                 } else {
                     for i in 0..3 {
                         let idx = idxs[i] as usize;
@@ -567,6 +586,7 @@ impl Scene {
                         let z = mesh.normals[3 * idx + 2];
                         n[i] = Vec3 { x: x, y: y, z: z }
                     }
+                    println!("-- NORMAL: {:?}", n);
                 }
 
                 triangles.push(Triangle {
@@ -612,33 +632,8 @@ impl Scene {
             }
 
             let dimension = 1;
-            octrees.push(Octree::new(dimension, triangles, material));
-        }
-
-        for (i, m) in materials.iter().enumerate() {
-            println!("material[{}].name = \'{}\'", i, m.name);
-            println!(
-                "    material.Ka = ({}, {}, {})",
-                m.ambient[0], m.ambient[1], m.ambient[2]
-            );
-            println!(
-                "    material.Kd = ({}, {}, {})",
-                m.diffuse[0], m.diffuse[1], m.diffuse[2]
-            );
-            println!(
-                "    material.Ks = ({}, {}, {})",
-                m.specular[0], m.specular[1], m.specular[2]
-            );
-            println!("    material.Ns = {}", m.shininess);
-            println!("    material.d = {}", m.dissolve);
-            println!("    material.map_Ka = {}", m.ambient_texture);
-            println!("    material.map_Kd = {}", m.diffuse_texture);
-            println!("    material.map_Ks = {}", m.specular_texture);
-            println!("    material.map_Ns = {}", m.normal_texture);
-            println!("    material.map_d = {}", m.dissolve_texture);
-            for (k, v) in &m.unknown_param {
-                println!("    unknown - material.{} = {}", k, v);
-            }
+            let octree = Octree::new(dimension, triangles, material);
+            octrees.push(octree);
         }
 
         let end = std::time::Instant::now();
@@ -664,16 +659,33 @@ impl Scene {
     }
 
     fn trace(&self, ray: Ray) -> Vec3 {
+        let mut t0 = std::f32::MAX;
+        let mut result = RaycastResult::Miss;
+        let mut material = Material::new();
+
         for octree in &self.octrees {
             let res = octree.intersects(&ray);
             match res {
                 RaycastResult::Hit { t, u, v, triangle } => {
-                    return octree.material.shade(&self, ray, t, u, v, triangle);
+                    if t < t0 {
+                        if t < 0.0 {
+                            println!("wtf");
+                        }
+                        t0 = t;
+                        material = octree.material;
+                        result = res;
+                    }
                 }
                 RaycastResult::Miss => continue,
             };
         }
-        self.trace_background(ray)
+
+        match result {
+            RaycastResult::Hit { t, u, v, triangle } => {
+                material.shade(&self, ray, t, u, v, triangle)
+            }
+            RaycastResult::Miss => self.trace_background(ray),
+        }
     }
 }
 
@@ -681,12 +693,19 @@ enum Encoding {
     ARGB,
 }
 
-fn encode_color(encoding: Encoding, color: Vec3) -> u32 {
+fn encode_color(encoding: Encoding, mut color: Vec3) -> u32 {
     match encoding {
         Encoding::ARGB => {
-            let ir = (color.x * 255.0) as u32;
-            let ig = (color.y * 255.0) as u32;
-            let ib = (color.z * 255.0) as u32;
+            // TODO: Implement f32.clamp and refactor this, used to avoid fireflies
+            color.x = if color.x > 1.0 { 1.0 } else { color.x };
+            color.y = if color.y > 1.0 { 1.0 } else { color.y };
+            color.z = if color.z > 1.0 { 1.0 } else { color.z };
+            color.x = if color.x < 0.0 { 0.0 } else { color.x };
+            color.y = if color.y < 0.0 { 0.0 } else { color.y };
+            color.z = if color.z < 0.0 { 0.0 } else { color.z };
+            let ir = (color.x.sqrt() * 255.99) as u32;
+            let ig = (color.y.sqrt() * 255.99) as u32;
+            let ib = (color.z.sqrt() * 255.99) as u32;
             let ia = 1_u32;
             let mut pixel = 0_u32;
             pixel += ia << 24;
@@ -698,6 +717,7 @@ fn encode_color(encoding: Encoding, color: Vec3) -> u32 {
     }
 }
 
+// FIXME: Does not seem to converge nor accumulate lighting from the src in the ceiling
 fn main() {
     let mut rng = rand::thread_rng();
     let mut buffer: Vec<u32> = vec![0; WINDOW_WIDTH * WINDOW_HEIGHT];
@@ -713,7 +733,7 @@ fn main() {
     });
 
     // let filepath = "/home/alexander/Desktop/models/rust_logo.obj";
-    let filepath = "/home/alexander/repos/Rusteray/models/cornell_box/cornell_box.obj";
+    let filepath = "/home/alexander/repos/Rusteray/models/cornell_box/cornell_box_empty.obj";
     let scene = Scene::new(filepath);
     // FIXME: From one axis does not work
     let from = Vec3 {
@@ -736,8 +756,8 @@ fn main() {
                 camera.position
                     + Vec3 {
                         x: 0.0,
-                        y: 0.1,
-                        z: 0.0,
+                        y: 0.0,
+                        z: 0.1,
                     },
                 to,
             );
@@ -762,8 +782,8 @@ fn main() {
                 camera.position
                     + Vec3 {
                         x: 0.0,
-                        y: -0.1,
-                        z: 0.0,
+                        y: 0.0,
+                        z: -0.1,
                     },
                 to,
             );
@@ -789,16 +809,15 @@ fn main() {
                 let mut color = Vec3::zero();
                 for _ in 0..SAMPLE_COUNT {
                     // Flipped variable t s.t y+ axis is up
-                    let r: f32 = 0.0; // rng.gen();
+                    let r: f32 = rng.gen();
                     let s = ((x as f32) + r) / (WINDOW_WIDTH as f32);
                     let t = ((y as f32) + r) / (WINDOW_HEIGHT as f32);
                     let ray = camera.ray(s, t);
                     color = color + scene.trace(ray);
                 }
                 color = color / (SAMPLE_COUNT as f32);
-                buffer[y * WINDOW_WIDTH + (WINDOW_WIDTH - x - 1)] = encode_color(Encoding::ARGB, color);
-
-                // std::thread::sleep(std::time::Duration::from_millis(50));
+                let idx = y * WINDOW_WIDTH + (WINDOW_WIDTH - x - 1);
+                buffer[idx] = encode_color(Encoding::ARGB, color);
             }
         }
 
