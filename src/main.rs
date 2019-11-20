@@ -31,15 +31,15 @@ impl Camera {
         let half_width = aspect * half_height;
 
         let wup = Vec3::y();
-        let dir = (from - to).normalize();
 
-        let u = dir.cross(wup).normalize();
-        let v = dir.cross(u).normalize();
+        let w = (from - to).normalize();
+        let u = w.cross(wup).normalize();
+        let v = w.cross(u).normalize();
 
         let horizontal = 2.0 * half_width * u;
         let vertical = 2.0 * half_height * v;
 
-        let frame_anchor = from - half_width * u - half_height * v - dir;
+        let frame_anchor = from - half_width * u - half_height * v - w;
 
         Camera {
             frame_anchor: frame_anchor,
@@ -96,13 +96,15 @@ struct Triangle {
 }
 
 impl Triangle {
-    // Ray-triangle intersection test from Real-Time Rendering 4th Edition (p. 964)
+    // Ray-triangle intersection test from Real-Time Rendering 4th Edition (p. 964) (Möller-Trumbore algorithm)
+    // Non-backface culling version of the algorithm
+    // Src [0]: http://www.graphics.cornell.edu/pubs/1997/MT97.pdf
     fn intersects(&self, ray: &Ray) -> RaycastResult {
         let e1 = self.v1 - self.v0;
         let e2 = self.v2 - self.v0;
         let q = ray.direction.cross(e2);
 
-        let a = e1.dot(q);
+        let a = e1.dot(q); // Determinant
         if a < std::f32::EPSILON && a > -std::f32::EPSILON {
             return RaycastResult::Miss;
         }
@@ -111,7 +113,7 @@ impl Triangle {
         let s = ray.origin - self.v0;
         let u = f * (s.dot(q));
 
-        if u < 0.0 {
+        if u < 0.0 || u > 1.0 {
             return RaycastResult::Miss;
         }
 
@@ -123,8 +125,8 @@ impl Triangle {
 
         let t = f * (e2.dot(r));
 
+        // Line intersection - not Ray 
         if t < 0.0 {
-            // println!("t < 0 in ray-triangle intersection");
             return RaycastResult::Miss;
         }
 
@@ -423,12 +425,12 @@ impl Material {
     // FIXME: Lambertian diffuse FRAC_1_PI factor missing, perhaps?
     fn shade(&self, scene: &Scene, ray: Ray, t: f32, u: f32, v: f32, triangle: Triangle) -> Vec3 {
         if ray.depth == RAY_DEPTH_MAX {
-            return self.emission + self.diffuse;
+            return self.emission;
         }
 
         let n = triangle.normal_at(u, v);
         let random = linalg::random_point_in_sphere();
-        let d = (ray.at(t) + n + random).normalize(); // FIXME: Is this really correct?
+        let d = (n + random).normalize(); // FIXME: Is this really correct?
 
         let next_ray = Ray {
             origin: ray.at(t) + (d * Vec3::new(0.0001)),
@@ -437,16 +439,17 @@ impl Material {
         };
 
         // FIXME: Flip reflected ray if hit on the backface of the triangle? What to do here?
-        let incoming = -ray.direction;
-        let cos_theta = incoming.dot(next_ray.direction);
+        let i = -ray.direction;
+        let cos_theta = d.dot(n);
         if cos_theta < 0.0 {
-            // println!("Cos theta! from: {:?} dir: {:?}", next_ray.origin, d);
-            // cos_theta = cos_theta + 1.0;
-            // next_ray.direction = -next_ray.direction;
+            // let o = next_ray.direction;
+            // println!("I = quiver3({}, {}, {}) \nhold on \nN = quiver3({}, {}, {}) \nhold on \nO = quiver3({}, {}, {}) \n", i.x, i.y, i.z, n.x, n.y, n.z, o.x, o.y, o.z);
             return Vec3::new(0.0);
         }
 
-        self.emission + self.diffuse * scene.trace(next_ray)
+        // TODO: Importance sampling the BRDF and lights
+        let pdf = cos_theta * std::f32::consts::FRAC_1_PI;
+        self.emission + pdf * self.diffuse * scene.trace(next_ray)
     }
 }
 
@@ -514,7 +517,7 @@ impl Octree {
                                 t0 = t;
                             }
                         }
-                        _ => continue,
+                        RaycastResult::Miss => continue,
                     };
                 }
             }
@@ -523,6 +526,7 @@ impl Octree {
     }
 }
 
+// TODO: Add emitter/light list 
 struct Scene {
     octrees: Vec<Octree>,
 }
@@ -648,7 +652,7 @@ impl Scene {
     }
 
     fn trace_background(&self, ray: Ray) -> Vec3 {
-        let t = ray.direction.y.abs();
+        let t = 0.5 * (ray.direction.y + 1.0);
         let white = Vec3::new(1.0);
         let light_blue = Vec3 {
             x: 0.5,
@@ -663,14 +667,12 @@ impl Scene {
         let mut result = RaycastResult::Miss;
         let mut material = Material::new();
 
+        // TODO: Create a octree hierarchy (similiar to a BVH)
         for octree in &self.octrees {
             let res = octree.intersects(&ray);
             match res {
                 RaycastResult::Hit { t, u, v, triangle } => {
-                    if t < t0 {
-                        if t < 0.0 {
-                            println!("wtf");
-                        }
+                    if t < t0 && t > std::f32::EPSILON {
                         t0 = t;
                         material = octree.material;
                         result = res;
