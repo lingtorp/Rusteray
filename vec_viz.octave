@@ -1,0 +1,38 @@
+#! octave
+
+X = quiver3(1.0, 0, 0);
+hold on
+Y = quiver3(0, 1.0, 0);
+hold on
+Z = quiver3(0, 0, 1.0);
+hold on
+
+
+I = quiver3(0.6975691, -0.23580994, -0.67660266) 
+hold on 
+N = quiver3(0, -1, 0) 
+hold on 
+O = quiver3(0.30566293, -0.516544, 0.79984534) 
+
+
+
+set(X, 'Color', 'black');
+set(Y, 'Color', 'black');
+set(Z, 'Color', 'black');
+
+set(I, 'Color', 'blue');
+set(N, 'Color', 'green');
+set(O, 'Color', 'red');
+
+set(X, 'LineWidth', 1);
+set(Y, 'LineWidth', 1);
+set(Z, 'LineWidth', 1);
+
+axis equal
+xlabel("X")
+ylabel("Y")
+zlabel("Z")
+
+while (true) 
+# Keep runnning
+endwhile
