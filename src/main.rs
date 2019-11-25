@@ -719,7 +719,6 @@ fn encode_color(encoding: Encoding, mut color: Vec3) -> u32 {
     }
 }
 
-// FIXME: Does not seem to converge nor accumulate lighting from the src in the ceiling
 fn main() {
     let mut rng = rand::thread_rng();
     let mut buffer: Vec<u32> = vec![0; WINDOW_WIDTH * WINDOW_HEIGHT];
@@ -734,7 +733,6 @@ fn main() {
         panic!("{}", e);
     });
 
-    // let filepath = "/home/alexander/Desktop/models/rust_logo.obj";
     let filepath = "/home/alexander/repos/Rusteray/models/cornell_box/cornell_box_empty.obj";
     let scene = Scene::new(filepath);
     // FIXME: From one axis does not work
