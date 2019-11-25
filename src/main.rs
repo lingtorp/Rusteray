@@ -10,9 +10,9 @@ use rand::prelude::*;
 mod linalg;
 use linalg::Vec3;
 
-const WINDOW_WIDTH: usize = 1000;
-const WINDOW_HEIGHT: usize = 1000;
-const SAMPLE_COUNT: usize = 100;
+const WINDOW_WIDTH: usize = 400;
+const WINDOW_HEIGHT: usize = 400;
+const SAMPLE_COUNT: usize = 1000;
 const RAY_DEPTH_MAX: usize = 20;
 
 struct Camera {
@@ -422,15 +422,13 @@ impl Material {
         }
     }
 
-    // FIXME: Lambertian diffuse FRAC_1_PI factor missing, perhaps?
     fn shade(&self, scene: &Scene, ray: Ray, t: f32, u: f32, v: f32, triangle: Triangle) -> Vec3 {
         if ray.depth == RAY_DEPTH_MAX {
             return self.emission;
         }
 
         let n = triangle.normal_at(u, v);
-        let random = linalg::random_point_in_sphere();
-        let d = (n + random).normalize(); // FIXME: Is this really correct?
+        let d = linalg::random_point_on_hemisphere(n);
 
         let next_ray = Ray {
             origin: ray.at(t) + (d * Vec3::new(0.0001)),
@@ -438,18 +436,20 @@ impl Material {
             depth: ray.depth + 1,
         };
 
-        // FIXME: Flip reflected ray if hit on the backface of the triangle? What to do here?
-        let i = -ray.direction;
         let cos_theta = d.dot(n);
         if cos_theta < 0.0 {
-            // let o = next_ray.direction;
-            // println!("I = quiver3({}, {}, {}) \nhold on \nN = quiver3({}, {}, {}) \nhold on \nO = quiver3({}, {}, {}) \n", i.x, i.y, i.z, n.x, n.y, n.z, o.x, o.y, o.z);
+            let i = -ray.direction;
+            let o = next_ray.direction;
+            println!("I = quiver3({}, {}, {}) \nhold on \nN = quiver3({}, {}, {}) \nhold on \nO = quiver3({}, {}, {}) \n", i.x, i.y, i.z, n.x, n.y, n.z, o.x, o.y, o.z);
             return Vec3::new(0.0);
         }
 
+        // NOTE: If diffuse reflectance exceeds 1 / PI it will reflect more light than it receives ..
+
         // TODO: Importance sampling the BRDF and lights
-        let pdf = cos_theta * std::f32::consts::FRAC_1_PI;
-        self.emission + pdf * self.diffuse * scene.trace(next_ray)
+        let brdf = std::f32::consts::FRAC_1_PI; // Assuming Lambertian material always
+        let pdf_inv = 1.0 / std::f32::consts::FRAC_2_PI;
+        self.emission + brdf * pdf_inv * self.diffuse * scene.trace(next_ray)
     }
 }
 
