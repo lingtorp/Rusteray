@@ -10,11 +10,17 @@ use rand::prelude::*;
 mod linalg;
 use linalg::Vec3;
 
-const WINDOW_WIDTH: usize = 400;
-const WINDOW_HEIGHT: usize = 400;
-const SAMPLE_COUNT: usize = 1000;
-const RAY_DEPTH_MAX: usize = 20;
+use std::sync::{Arc};
 
+extern crate threadpool;
+use threadpool::ThreadPool;
+
+const WINDOW_WIDTH: usize = 500;
+const WINDOW_HEIGHT: usize = 500;
+const SAMPLE_COUNT: usize = 50;
+const RAY_DEPTH_MAX: usize = 50;
+
+#[derive(Debug, Copy, Clone)]
 struct Camera {
     frame_anchor: Vec3,
     u: Vec3,
@@ -719,8 +725,15 @@ fn encode_color(encoding: Encoding, mut color: Vec3) -> u32 {
     }
 }
 
+// TODO: Execute per region instead per pixel
+struct Region {
+    x0: usize,
+    x1: usize,
+    y0: usize,
+    y1: usize,
+}
+
 fn main() {
-    let mut rng = rand::thread_rng();
     let mut buffer: Vec<u32> = vec![0; WINDOW_WIDTH * WINDOW_HEIGHT];
 
     let mut window = Window::new(
@@ -734,7 +747,7 @@ fn main() {
     });
 
     let filepath = "/home/alexander/repos/Rusteray/models/cornell_box/cornell_box_empty.obj";
-    let scene = Scene::new(filepath);
+    let scene = Arc::new(Scene::new(filepath));
     // FIXME: From one axis does not work
     let from = Vec3 {
         x: 0.0,
@@ -801,24 +814,40 @@ fn main() {
                 to,
             );
         }
+    let camera = Camera::new(50.0, from, to);
 
+    let pool = ThreadPool::new(4);
+
+    let (tx, rx) = std::sync::mpsc::channel();
+
+    while window.is_open() && !window.is_key_down(Key::Escape) {
         let start = std::time::Instant::now();
 
         for x in 0..WINDOW_WIDTH {
             for y in 0..WINDOW_HEIGHT {
-                let mut color = Vec3::zero();
-                for _ in 0..SAMPLE_COUNT {
-                    // Flipped variable t s.t y+ axis is up
-                    let r: f32 = rng.gen();
-                    let s = ((x as f32) + r) / (WINDOW_WIDTH as f32);
-                    let t = ((y as f32) + r) / (WINDOW_HEIGHT as f32);
-                    let ray = camera.ray(s, t);
-                    color = color + scene.trace(ray);
-                }
-                color = color / (SAMPLE_COUNT as f32);
-                let idx = y * WINDOW_WIDTH + (WINDOW_WIDTH - x - 1);
-                buffer[idx] = encode_color(Encoding::ARGB, color);
+                let tx = tx.clone();
+                let camera = camera.clone();
+                let scene = Arc::clone(&scene);
+                pool.execute(move || {
+                    let mut rng = rand::thread_rng();
+                    let mut color = Vec3::zero();     
+                    for _ in 0..SAMPLE_COUNT {
+                        // Flipped variable t s.t y+ axis is up
+                        let r: f32 = rng.gen();
+                        let s = ((x as f32) + r) / (WINDOW_WIDTH as f32);
+                        let t = ((y as f32) + r) / (WINDOW_HEIGHT as f32);
+                        let ray = camera.ray(s, t);
+                        color = color + scene.trace(ray);
+                    }
+                    color = color / (SAMPLE_COUNT as f32);
+                    tx.send((x, y, encode_color(Encoding::ARGB, color))).expect("Failed to send pixel!");
+                });
             }
+        }
+
+        for _ in 0..WINDOW_WIDTH * WINDOW_HEIGHT {
+            let (x, y, pixel) = rx.recv().unwrap_or_default();
+            buffer[y * WINDOW_WIDTH + x] = pixel;
         }
 
         let end = std::time::Instant::now();
