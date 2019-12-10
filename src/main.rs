@@ -10,7 +10,7 @@ use rand::prelude::*;
 mod linalg;
 use linalg::Vec3;
 
-use std::sync::{Arc};
+use std::sync::Arc;
 
 extern crate threadpool;
 use threadpool::ThreadPool;
@@ -131,7 +131,7 @@ impl Triangle {
 
         let t = f * (e2.dot(r));
 
-        // Line intersection - not Ray 
+        // Line intersection - not Ray
         if t < 0.0 {
             return RaycastResult::Miss;
         }
@@ -532,7 +532,7 @@ impl Octree {
     }
 }
 
-// TODO: Add emitter/light list 
+// TODO: Add emitter/light list
 struct Scene {
     octrees: Vec<Octree>,
 }
@@ -759,61 +759,7 @@ fn main() {
         y: 1.0,
         z: 0.0,
     };
-    let mut camera = Camera::new(50.0, from, to);
 
-    while window.is_open() && !window.is_key_down(Key::Escape) {
-        // Input handling
-        if window.is_key_down(Key::W) {
-            camera = Camera::new(
-                camera.fov,
-                camera.position
-                    + Vec3 {
-                        x: 0.0,
-                        y: 0.0,
-                        z: 0.1,
-                    },
-                to,
-            );
-        }
-
-        if window.is_key_down(Key::A) {
-            camera = Camera::new(
-                camera.fov,
-                camera.position
-                    + Vec3 {
-                        x: -0.1,
-                        y: 0.0,
-                        z: 0.0,
-                    },
-                to,
-            );
-        }
-
-        if window.is_key_down(Key::S) {
-            camera = Camera::new(
-                camera.fov,
-                camera.position
-                    + Vec3 {
-                        x: 0.0,
-                        y: 0.0,
-                        z: -0.1,
-                    },
-                to,
-            );
-        }
-
-        if window.is_key_down(Key::D) {
-            camera = Camera::new(
-                camera.fov,
-                camera.position
-                    + Vec3 {
-                        x: 0.1,
-                        y: 0.0,
-                        z: 0.0,
-                    },
-                to,
-            );
-        }
     let camera = Camera::new(50.0, from, to);
 
     let pool = ThreadPool::new(4);
@@ -830,7 +776,7 @@ fn main() {
                 let scene = Arc::clone(&scene);
                 pool.execute(move || {
                     let mut rng = rand::thread_rng();
-                    let mut color = Vec3::zero();     
+                    let mut color = Vec3::zero();
                     for _ in 0..SAMPLE_COUNT {
                         // Flipped variable t s.t y+ axis is up
                         let r: f32 = rng.gen();
@@ -840,7 +786,8 @@ fn main() {
                         color = color + scene.trace(ray);
                     }
                     color = color / (SAMPLE_COUNT as f32);
-                    tx.send((x, y, encode_color(Encoding::ARGB, color))).expect("Failed to send pixel!");
+                    tx.send((x, y, encode_color(Encoding::ARGB, color)))
+                        .expect("Failed to send pixel!");
                 });
             }
         }
