@@ -442,20 +442,12 @@ impl Material {
             depth: ray.depth + 1,
         };
 
-        let cos_theta = d.dot(n);
-        if cos_theta < 0.0 {
-            let i = -ray.direction;
-            let o = next_ray.direction;
-            println!("I = quiver3({}, {}, {}) \nhold on \nN = quiver3({}, {}, {}) \nhold on \nO = quiver3({}, {}, {}) \n", i.x, i.y, i.z, n.x, n.y, n.z, o.x, o.y, o.z);
-            return Vec3::new(0.0);
-        }
-
         // NOTE: If diffuse reflectance exceeds 1 / PI it will reflect more light than it receives ..
-
         // TODO: Importance sampling the BRDF and lights
+
         let brdf = std::f32::consts::FRAC_1_PI; // Assuming Lambertian material always
         let pdf_inv = 1.0 / std::f32::consts::FRAC_2_PI;
-        self.emission + brdf * pdf_inv * self.diffuse * scene.trace(next_ray)
+        self.emission + d.dot(n) * brdf * pdf_inv * self.diffuse * scene.trace(next_ray)
     }
 }
 
@@ -540,7 +532,7 @@ struct Scene {
 impl Scene {
     fn new(path: &str) -> Scene {
         let start = std::time::Instant::now();
-        println!("Starting to load scene ...");
+        println!("Starting to load scene {}", path);
 
         let mut octrees = Vec::new();
 
@@ -746,14 +738,16 @@ fn main() {
         panic!("{}", e);
     });
 
-    let filepath = "/home/alexander/repos/Rusteray/models/cornell_box/cornell_box_empty.obj";
-    let scene = Arc::new(Scene::new(filepath));
+    let directory = std::env::current_dir().unwrap_or_default();
+    let filepath = format!("{}{}", directory.to_str().unwrap_or_default(), "/models/cornell_box/cornell_box_empty.obj");
+    let scene = Arc::new(Scene::new(&filepath));
+
     // FIXME: From one axis does not work
-    let from = Vec3 {
-        x: 0.0,
+    let from = Vec3 {x: 0.0,
         y: 1.0,
         z: 3.0,
     };
+
     let to = Vec3 {
         x: 0.0,
         y: 1.0,
@@ -762,7 +756,8 @@ fn main() {
 
     let camera = Camera::new(50.0, from, to);
 
-    let pool = ThreadPool::new(4);
+    println!("Using {} threads ...", num_cpus::get());
+    let pool = ThreadPool::new(num_cpus::get());
 
     let (tx, rx) = std::sync::mpsc::channel();
 
