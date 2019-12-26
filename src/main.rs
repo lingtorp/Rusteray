@@ -163,6 +163,13 @@ struct AABB {
     max: Vec3,
 }
 
+#[derive(Debug)]
+enum Containment {
+    None,
+    Partial,
+    Full,
+}
+
 impl AABB {
     // AABB-Ray intersection test using 3D slab-method
     fn intersects(&self, ray: &Ray) -> bool {
@@ -205,90 +212,76 @@ impl AABB {
         true
     }
 
+    // Construct AABB with inclusive boundaries
     fn from_triangles(triangles: &[Triangle]) -> AABB {
-        let mut min_x = std::f32::MAX;
-        let mut min_y = std::f32::MAX;
-        let mut min_z = std::f32::MAX;
-        let mut max_x = std::f32::MIN;
-        let mut max_y = std::f32::MIN;
-        let mut max_z = std::f32::MIN;
+        let mut min = Vec3::new(std::f32::MAX);
+        let mut max = Vec3::new(std::f32::MIN);
 
         for triangle in triangles {
             // Min
-            if triangle.v0.x < min_x {
-                min_x = triangle.v0.x;
+            if triangle.v0.x < min.x {
+                min.x = triangle.v0.x;
             }
-            if triangle.v1.x < min_x {
-                min_x = triangle.v1.x;
+            if triangle.v1.x < min.x {
+                min.x = triangle.v1.x;
             }
-            if triangle.v2.x < min_x {
-                min_x = triangle.v2.x;
-            }
-
-            if triangle.v0.y < min_y {
-                min_y = triangle.v0.y;
-            }
-            if triangle.v1.y < min_y {
-                min_y = triangle.v1.y;
-            }
-            if triangle.v2.y < min_y {
-                min_y = triangle.v2.y;
+            if triangle.v2.x < min.x {
+                min.x = triangle.v2.x;
             }
 
-            if triangle.v0.z < min_z {
-                min_z = triangle.v0.z;
+            if triangle.v0.y < min.y {
+                min.y = triangle.v0.y;
             }
-            if triangle.v1.z < min_z {
-                min_z = triangle.v1.z;
+            if triangle.v1.y < min.y {
+                min.y = triangle.v1.y;
             }
-            if triangle.v2.z < min_z {
-                min_z = triangle.v2.z;
+            if triangle.v2.y < min.y {
+                min.y = triangle.v2.y;
+            }
+
+            if triangle.v0.z < min.z {
+                min.z = triangle.v0.z;
+            }
+            if triangle.v1.z < min.z {
+                min.z = triangle.v1.z;
+            }
+            if triangle.v2.z < min.z {
+                min.z = triangle.v2.z;
             }
 
             // Max
-            if triangle.v0.x > max_x {
-                max_x = triangle.v0.x;
+            if triangle.v0.x > max.x {
+                max.x = triangle.v0.x;
             }
-            if triangle.v1.x > max_x {
-                max_x = triangle.v1.x;
+            if triangle.v1.x > max.x {
+                max.x = triangle.v1.x;
             }
-            if triangle.v2.x > max_x {
-                max_x = triangle.v2.x;
-            }
-
-            if triangle.v0.y > max_y {
-                max_y = triangle.v0.y;
-            }
-            if triangle.v1.y > max_y {
-                max_y = triangle.v1.y;
-            }
-            if triangle.v2.y > max_y {
-                max_y = triangle.v2.y;
+            if triangle.v2.x > max.x {
+                max.x = triangle.v2.x;
             }
 
-            if triangle.v0.z > max_z {
-                max_z = triangle.v0.z;
+            if triangle.v0.y > max.y {
+                max.y = triangle.v0.y;
             }
-            if triangle.v1.z > max_z {
-                max_z = triangle.v1.z;
+            if triangle.v1.y > max.y {
+                max.y = triangle.v1.y;
             }
-            if triangle.v2.z > max_z {
-                max_z = triangle.v2.z;
+            if triangle.v2.y > max.y {
+                max.y = triangle.v2.y;
+            }
+
+            if triangle.v0.z > max.z {
+                max.z = triangle.v0.z;
+            }
+            if triangle.v1.z > max.z {
+                max.z = triangle.v1.z;
+            }
+            if triangle.v2.z > max.z {
+                max.z = triangle.v2.z;
             }
         }
 
-        AABB {
-            min: Vec3 {
-                x: min_x,
-                y: min_y,
-                z: min_z,
-            },
-            max: Vec3 {
-                x: max_x,
-                y: max_y,
-                z: max_z,
-            },
-        }
+        AABB { min: min, max: max }
     }
 
     // Based on the separating axis theorem (SAT) and Mr. Akenine-Möller himself and ref #2
@@ -347,30 +340,26 @@ impl AABB {
         true
     }
 
-    fn is_aabb_inside(&self, aabb: &AABB) -> bool {
-        self.is_point_inside(aabb.min) && self.is_point_inside(aabb.max)
+    fn is_aabb_inside(&self, aabb: &AABB) -> Containment {
+        let (a, b) = (
+            self.is_point_inside(aabb.min),
+            self.is_point_inside(aabb.max),
+        );
+        match (a, b) {
+            (false, false) => Containment::None,
+            (true, false) | (false, true) => Containment::Partial,
+            (true, true) => Containment::Full,
+        }
     }
 
+    // Inclusive boundaries (according to AABB creation)
     fn is_point_inside(&self, p: Vec3) -> bool {
-        if p.x > self.max.x {
-            return false;
+        let min = self.min;
+        let max = self.max;
+        if p.x <= max.x && p.y <= max.y && p.z <= max.z && p.x >= min.x && p.y >= min.y && p.z >= min.z {
+            return true;
         }
-        if p.y > self.max.y {
-            return false;
-        }
-        if p.z > self.max.z {
-            return false;
-        }
-        if p.x < self.min.x {
-            return false;
-        }
-        if p.y < self.min.y {
-            return false;
-        }
-        if p.z < self.min.z {
-            return false;
-        }
-        true
+        return false;
     }
 
     fn subdivide(&self, dimension: usize) -> Vec<AABB> {
@@ -460,37 +449,50 @@ struct Octree {
 }
 
 impl Octree {
+    /// Octree construction of a single model
     fn new(dimension: usize, triangles: Vec<Triangle>, material: Material) -> Octree {
         let root_aabb = AABB::from_triangles(&triangles);
-        println!("Root AABB: {:?}, dimension: {}", root_aabb, dimension);
+        println!("Root: {:#?}, dimension: {}", root_aabb, dimension);
+
         let aabbs = root_aabb.subdivide(dimension);
+        println!("{:#?}", aabbs);
 
         let mut aabb_triangles: Vec<Vec<Triangle>> = Vec::new();
         for _ in 0..dimension * dimension * dimension {
             aabb_triangles.push(Vec::new());
         }
 
+        let mut did_not_fit_aabbs: u32 = 0;
         for triangle in triangles {
             let mut did_fit_aabb = false;
             let triangle_aabb = AABB::from_triangles(&vec![triangle]);
 
             for (i, aabb) in aabbs.iter().enumerate() {
-                if aabb.is_aabb_inside(&triangle_aabb) {
-                    aabb_triangles[i].push(triangle);
-                    did_fit_aabb = true;
-                    break;
+                match aabb.is_aabb_inside(&triangle_aabb) {
+                    Containment::Full | Containment::Partial => {
+                        aabb_triangles[i].push(triangle);
+                        did_fit_aabb = true;
+                        break;
+                    }
+                    Containment::None => continue,
                 }
             }
 
             if !did_fit_aabb {
+                did_not_fit_aabbs += 1;
+                let a = root_aabb.is_aabb_inside(&triangle_aabb);
+                println!("{:#?}, {:#?}, {:?}", triangle, root_aabb, a);
                 // Add triangle to all AABBs that intersects it
                 for (i, aabb) in aabbs.iter().enumerate() {
                     if aabb.intersects_triangle(triangle) {
+                        println!("Triangle-AABB intersection: {:?}, {:?}", triangle, aabb);
                         aabb_triangles[i].push(triangle);
                     }
                 }
             }
         }
+
+        println!("# triangles not fitting to AABBs: {}", did_not_fit_aabbs);
 
         Octree {
             dimension: dimension,
@@ -579,7 +581,6 @@ impl Scene {
                     n[0] = normal;
                     n[1] = n[0];
                     n[2] = n[0];
-                    println!("-- COMPUTED NORMAL: {:?}", normal);
                 } else {
                     for i in 0..3 {
                         let idx = idxs[i] as usize;
@@ -588,7 +589,6 @@ impl Scene {
                         let z = mesh.normals[3 * idx + 2];
                         n[i] = Vec3 { x: x, y: y, z: z }
                     }
-                    println!("-- NORMAL: {:?}", n);
                 }
 
                 triangles.push(Triangle {
@@ -633,7 +633,8 @@ impl Scene {
                 }
             }
 
-            let dimension = 1;
+            // FIXME: Octree construction does not work ...
+            let dimension = 2;
             let octree = Octree::new(dimension, triangles, material);
             octrees.push(octree);
         }
@@ -739,18 +740,23 @@ fn main() {
     });
 
     let directory = std::env::current_dir().unwrap_or_default();
-    let filepath = format!("{}{}", directory.to_str().unwrap_or_default(), "/models/cornell_box/cornell_box_empty.obj");
+    let filepath = format!(
+        "{}{}",
+        directory.to_str().unwrap_or_default(),
+        "/models/rust-logo/rust_logo.obj"
+    );
     let scene = Arc::new(Scene::new(&filepath));
 
     // FIXME: From one axis does not work
-    let from = Vec3 {x: 0.0,
-        y: 1.0,
-        z: 3.0,
+    let from = Vec3 {
+        x: 0.0,
+        y: 2.0,
+        z: 2.0,
     };
 
     let to = Vec3 {
         x: 0.0,
-        y: 1.0,
+        y: 0.0,
         z: 0.0,
     };
 
