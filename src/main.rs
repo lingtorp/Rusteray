@@ -356,7 +356,13 @@ impl AABB {
     fn is_point_inside(&self, p: Vec3) -> bool {
         let min = self.min;
         let max = self.max;
-        if p.x <= max.x && p.y <= max.y && p.z <= max.z && p.x >= min.x && p.y >= min.y && p.z >= min.z {
+        if p.x <= max.x
+            && p.y <= max.y
+            && p.z <= max.z
+            && p.x >= min.x
+            && p.y >= min.y
+            && p.z >= min.z
+        {
             return true;
         }
         return false;
@@ -451,11 +457,10 @@ struct Octree {
 impl Octree {
     /// Octree construction of a single model
     fn new(dimension: usize, triangles: Vec<Triangle>, material: Material) -> Octree {
+
         let root_aabb = AABB::from_triangles(&triangles);
-        println!("Root: {:#?}, dimension: {}", root_aabb, dimension);
 
         let aabbs = root_aabb.subdivide(dimension);
-        println!("{:#?}", aabbs);
 
         let mut aabb_triangles: Vec<Vec<Triangle>> = Vec::new();
         for _ in 0..dimension * dimension * dimension {
@@ -463,36 +468,29 @@ impl Octree {
         }
 
         let mut did_not_fit_aabbs: u32 = 0;
+        let mut partial_fits: u32 = 0;
         for triangle in triangles {
-            let mut did_fit_aabb = false;
             let triangle_aabb = AABB::from_triangles(&vec![triangle]);
 
             for (i, aabb) in aabbs.iter().enumerate() {
                 match aabb.is_aabb_inside(&triangle_aabb) {
-                    Containment::Full | Containment::Partial => {
+                    // Full containment of triangle in AABB, can move to next
+                    Containment::Full => {
                         aabb_triangles[i].push(triangle);
-                        did_fit_aabb = true;
                         break;
                     }
-                    Containment::None => continue,
-                }
-            }
-
-            if !did_fit_aabb {
-                did_not_fit_aabbs += 1;
-                let a = root_aabb.is_aabb_inside(&triangle_aabb);
-                println!("{:#?}, {:#?}, {:?}", triangle, root_aabb, a);
-                // Add triangle to all AABBs that intersects it
-                for (i, aabb) in aabbs.iter().enumerate() {
-                    if aabb.intersects_triangle(triangle) {
-                        println!("Triangle-AABB intersection: {:?}, {:?}", triangle, aabb);
+                    // Triangles may span several AABBs, must add to all
+                    Containment::Partial => {
+                        partial_fits += 1;
                         aabb_triangles[i].push(triangle);
                     }
+                    Containment::None => continue,
                 }
             }
         }
 
         println!("# triangles not fitting to AABBs: {}", did_not_fit_aabbs);
+        println!("# triangles partially fitting to a AABB: {}", partial_fits);
 
         Octree {
             dimension: dimension,
@@ -634,7 +632,7 @@ impl Scene {
             }
 
             // FIXME: Octree construction does not work ...
-            let dimension = 2;
+            let dimension = 4;
             let octree = Octree::new(dimension, triangles, material);
             octrees.push(octree);
         }
@@ -718,19 +716,11 @@ fn encode_color(encoding: Encoding, mut color: Vec3) -> u32 {
     }
 }
 
-// TODO: Execute per region instead per pixel
-struct Region {
-    x0: usize,
-    x1: usize,
-    y0: usize,
-    y1: usize,
-}
-
 fn main() {
     let mut buffer: Vec<u32> = vec![0; WINDOW_WIDTH * WINDOW_HEIGHT];
 
     let mut window = Window::new(
-        "Rusteray - ESC to exit",
+        "Rusteray",
         WINDOW_WIDTH,
         WINDOW_HEIGHT,
         WindowOptions::default(),
@@ -762,7 +752,7 @@ fn main() {
 
     let camera = Camera::new(50.0, from, to);
 
-    println!("Using {} threads ...", num_cpus::get());
+    println!("Using {} threads in threadpool ...", num_cpus::get());
     let pool = ThreadPool::new(num_cpus::get());
 
     let (tx, rx) = std::sync::mpsc::channel();
@@ -800,11 +790,15 @@ fn main() {
 
         let end = std::time::Instant::now();
         let diff = end - start;
-        println!(
-            "Frame rendered in: {}.{} s",
+
+        let title = format!(
+            "Rusteray - {}.{} s/frame",
             diff.as_secs(),
             diff.subsec_millis()
         );
+
+        println!("{}", title);
+        window.set_title(&title);
 
         window.update_with_buffer(&buffer).unwrap();
     }
