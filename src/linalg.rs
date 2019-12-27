@@ -7,16 +7,7 @@ pub fn random_0_1() -> f32 {
     return step.sample(&mut rng);
 }
 
-// Returns random point on the unit sphere's surface
-pub fn random_point_on_sphere() -> Vec3 {
-    let v: [f32; 3] = UnitSphere.sample(&mut rand::thread_rng());
-    Vec3 {
-        x: v[0],
-        y: v[1],
-        z: v[2],
-    }
-}
-
+// Returns unit vector of a random vector oriented by the normal (n) on the positive hemisphere
 pub fn random_point_on_hemisphere(n: Vec3) -> Vec3 {
     loop {
         let v: [f32; 3] = UnitSphere.sample(&mut rand::thread_rng());

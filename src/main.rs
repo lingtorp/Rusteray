@@ -147,14 +147,6 @@ impl Triangle {
     fn normal_at(&self, u: f32, v: f32) -> Vec3 {
         ((1.0 - u - v) * self.n0 + u * self.n1 + v * self.n2).normalize()
     }
-
-    fn centroid(&self) -> Vec3 {
-        Vec3 {
-            x: (self.v0.x + self.v1.x + self.v2.x) / 3.0,
-            y: (self.v0.y + self.v1.y + self.v2.y) / 3.0,
-            z: (self.v0.z + self.v1.z + self.v2.z) / 3.0,
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -163,6 +155,7 @@ struct AABB {
     max: Vec3,
 }
 
+/// Describes the degree of containment of geometric bodies
 #[derive(Debug)]
 enum Containment {
     None,
@@ -284,62 +277,6 @@ impl AABB {
         AABB { min: min, max: max }
     }
 
-    // Based on the separating axis theorem (SAT) and Mr. Akenine-Möller himself and ref #2
-    // Reference 1 [p. 2]: http://fileadmin.cs.lth.se/cs/Personal/Tomas_Akenine-Moller/pubs/tribox.pdf
-    // Referens  2: https://stackoverflow.com/questions/17458562/efficient-aabb-triangle-intersection-in-c-sharp
-    fn intersects_triangle(&self, t: Triangle) -> bool {
-        let aabb_normals = vec![Vec3::x(), Vec3::y(), Vec3::z()];
-        let mins = vec![self.min.x, self.min.y, self.min.z];
-        let maxs = vec![self.max.x, self.max.y, self.max.z];
-
-        // 3 tests - AABBs normals
-        for i in 0..3 {
-            let (min, max) = project(&[t.v0, t.v1, t.v2], aabb_normals[i]);
-            if max <= mins[i] || min >= maxs[i] {
-                return false;
-            }
-        }
-
-        // 1 test - triangle normal/plane vs. AABB intersection
-        {
-            let normal = (t.v0 - t.v1).cross(t.v0 - t.v2);
-
-            let center = (self.min + self.max) * 0.5; // AABB center
-            let extents = self.max - center; // Positive extents
-            let radius = extents.dot(normal.abs());
-
-            // Compute distance of AABB from plane
-            let distance = normal.dot(center);
-            if distance <= radius {
-                return false;
-            }
-        }
-
-        // 9 tests - axis formed from edges of
-        {
-            // Compute edges of translated triangle
-            let c = (self.min + self.max) * 0.5; // AABB center
-            let h = self.max - c; // +Half-vector
-            let edges = vec![
-                t.v0 - t.v1 - (2.0 * c),
-                t.v0 - t.v2 - (2.0 * c),
-                t.v1 - t.v2 - (2.0 * c),
-            ];
-            let translated = vec![t.v0 - c, t.v1 - c, t.v2 - c];
-            for i in 0..3 {
-                for j in 0..3 {
-                    let axis = edges[i].cross(aabb_normals[j]);
-                    let r = h.dot(axis.abs());
-                    let (t_min, t_max) = project(&translated, axis);
-                    if t_min > r || t_max < -r {
-                        return false;
-                    }
-                }
-            }
-        }
-        true
-    }
-
     fn is_aabb_inside(&self, aabb: &AABB) -> Containment {
         let (a, b) = (
             self.is_point_inside(aabb.min),
@@ -393,21 +330,6 @@ impl AABB {
     }
 }
 
-fn project(points: &[Vec3], on: Vec3) -> (f32, f32) {
-    let mut max = std::f32::MIN;
-    let mut min = std::f32::MAX;
-    for point in points {
-        let t = point.dot(on);
-        if t < min {
-            min = t;
-        }
-        if t > max {
-            max = t;
-        }
-    }
-    (min, max)
-}
-
 // NOTE: Phong reflection model as described by the .MTL format
 #[derive(Debug, Clone, Copy)]
 struct Material {
@@ -457,7 +379,6 @@ struct Octree {
 impl Octree {
     /// Octree construction of a single model
     fn new(dimension: usize, triangles: Vec<Triangle>, material: Material) -> Octree {
-
         let root_aabb = AABB::from_triangles(&triangles);
 
         let aabbs = root_aabb.subdivide(dimension);
@@ -471,22 +392,26 @@ impl Octree {
         let mut partial_fits: u32 = 0;
         for triangle in triangles {
             let triangle_aabb = AABB::from_triangles(&vec![triangle]);
+            let mut did_fit = false; // Did the triangle fit into a AABB?
 
             for (i, aabb) in aabbs.iter().enumerate() {
                 match aabb.is_aabb_inside(&triangle_aabb) {
                     // Full containment of triangle in AABB, can move to next
                     Containment::Full => {
+                        did_fit = true;
                         aabb_triangles[i].push(triangle);
                         break;
                     }
                     // Triangles may span several AABBs, must add to all
                     Containment::Partial => {
+                        did_fit = true;
                         partial_fits += 1;
                         aabb_triangles[i].push(triangle);
                     }
                     Containment::None => continue,
                 }
             }
+            did_not_fit_aabbs += if !did_fit { 1 } else { 0 };
         }
 
         println!("# triangles not fitting to AABBs: {}", did_not_fit_aabbs);
@@ -509,7 +434,7 @@ impl Octree {
                 for triangle in &self.triangles[i] {
                     let res = triangle.intersects(ray);
                     match res {
-                        RaycastResult::Hit { t, u, v, triangle } => {
+                        RaycastResult::Hit { t, u: _, v: _, triangle: _ } => {
                             if t < t0 && t > std::f32::EPSILON {
                                 result = res;
                                 t0 = t;
@@ -608,67 +533,68 @@ impl Scene {
                 material.diffuse = Vec3 {
                     x: materials[mid].diffuse[0],
                     y: materials[mid].diffuse[1],
-                    z: materials[mid].diffuse[2],
-                };
+                        z: materials[mid].diffuse[2],
+                    };
 
-                if let emission = &materials[mid].unknown_param["Ke"] {
-                    let strs = emission.split(" ").collect::<Vec<_>>();
-                    if strs.len() == 3 {
-                        let mut e = vec![0.0; 3];
+                    let emission = &materials[mid].unknown_param["Ke"];
+                    if emission.len() > 0 {
+                        let strs = emission.split(" ").collect::<Vec<_>>();
+                        if strs.len() == 3 {
+                            let mut e = vec![0.0; 3];
 
-                        for (i, s) in strs.iter().enumerate() {
-                            if let Ok(num) = s.parse::<f32>() {
-                                e[i] = num;
+                            for (i, s) in strs.iter().enumerate() {
+                                if let Ok(num) = s.parse::<f32>() {
+                                    e[i] = num;
+                                }
                             }
-                        }
 
-                        material.emission = Vec3 {
-                            x: e[0],
-                            y: e[1],
-                            z: e[2],
-                        };
+                            material.emission = Vec3 {
+                                x: e[0],
+                                y: e[1],
+                                z: e[2],
+                            };
+                        }
                     }
                 }
+
+                // FIXME: Octree construction does not work ...
+                let dimension = 4;
+                let octree = Octree::new(dimension, triangles, material);
+                octrees.push(octree);
             }
 
-            // FIXME: Octree construction does not work ...
-            let dimension = 4;
-            let octree = Octree::new(dimension, triangles, material);
-            octrees.push(octree);
+            let end = std::time::Instant::now();
+            let diff = end - start;
+            println!(
+                "Scene loaded in: {}.{} secs",
+                diff.as_secs(),
+                diff.subsec_millis()
+            );
+
+            Scene { octrees: octrees }
         }
 
-        let end = std::time::Instant::now();
-        let diff = end - start;
-        println!(
-            "Scene loaded in: {}.{} secs",
-            diff.as_secs(),
-            diff.subsec_millis()
-        );
+        fn trace_background(&self, ray: Ray) -> Vec3 {
+            let t = 0.5 * (ray.direction.y + 1.0);
+            let white = Vec3::new(1.0);
+            let light_blue = Vec3 {
+                x: 0.5,
+                y: 0.7,
+                z: 1.0,
+            };
+            ((1.0 - t) * white + t * light_blue)
+        }
 
-        Scene { octrees: octrees }
-    }
+        fn trace(&self, ray: Ray) -> Vec3 {
+            let mut t0 = std::f32::MAX;
+            let mut result = RaycastResult::Miss;
+            let mut material = Material::new();
 
-    fn trace_background(&self, ray: Ray) -> Vec3 {
-        let t = 0.5 * (ray.direction.y + 1.0);
-        let white = Vec3::new(1.0);
-        let light_blue = Vec3 {
-            x: 0.5,
-            y: 0.7,
-            z: 1.0,
-        };
-        ((1.0 - t) * white + t * light_blue)
-    }
-
-    fn trace(&self, ray: Ray) -> Vec3 {
-        let mut t0 = std::f32::MAX;
-        let mut result = RaycastResult::Miss;
-        let mut material = Material::new();
-
-        // TODO: Create a octree hierarchy (similiar to a BVH)
-        for octree in &self.octrees {
-            let res = octree.intersects(&ray);
-            match res {
-                RaycastResult::Hit { t, u, v, triangle } => {
+            // TODO: Create a octree hierarchy (similiar to a BVH)
+            for octree in &self.octrees {
+                let res = octree.intersects(&ray);
+                match res {
+                    RaycastResult::Hit { t, u: _, v: _, triangle: _ } => {
                     if t < t0 && t > std::f32::EPSILON {
                         t0 = t;
                         material = octree.material;
