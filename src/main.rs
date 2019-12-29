@@ -15,10 +15,12 @@ use std::sync::Arc;
 extern crate threadpool;
 use threadpool::ThreadPool;
 
-const WINDOW_WIDTH: usize = 500;
-const WINDOW_HEIGHT: usize = 500;
-const SAMPLE_COUNT: usize = 50;
-const RAY_DEPTH_MAX: usize = 50;
+extern crate num_cpus;
+
+const WINDOW_WIDTH: usize = 400;
+const WINDOW_HEIGHT: usize = 400;
+const SAMPLE_COUNT: usize = 5;
+const RAY_DEPTH_MAX: usize = 5;
 
 #[derive(Debug, Copy, Clone)]
 struct Camera {
@@ -67,15 +69,18 @@ impl Camera {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct Intersection {
+    t: f32,
+    u: f32,
+    v: f32,
+    n: Vec3,
+}
+
 #[derive(Debug)]
 enum RaycastResult {
     Miss,
-    Hit {
-        t: f32,
-        u: f32,
-        v: f32,
-        triangle: Triangle,
-    },
+    Hit(Intersection),
 }
 
 #[derive(Debug)]
@@ -136,12 +141,14 @@ impl Triangle {
             return RaycastResult::Miss;
         }
 
-        RaycastResult::Hit {
-            t,
-            u,
-            v,
-            triangle: *self,
-        }
+        let intersection = Intersection {
+            t: t,
+            u: u,
+            v: v,
+            n: self.normal_at(u, v),
+        };
+
+        RaycastResult::Hit(intersection)
     }
 
     fn normal_at(&self, u: f32, v: f32) -> Vec3 {
@@ -165,7 +172,7 @@ enum Containment {
 
 impl AABB {
     // AABB-Ray intersection test using 3D slab-method
-    fn intersects(&self, ray: &Ray) -> bool {
+    fn intersects(&self, ray: &Ray) -> RaycastResult {
         let min = (self.min - ray.origin) / ray.direction;
         let max = (self.max - ray.origin) / ray.direction;
 
@@ -178,7 +185,7 @@ impl AABB {
             tmin = linalg::fmax(t0, tmin);
             tmax = linalg::fmin(t1, tmax);
             if tmax < tmin {
-                return false;
+                return RaycastResult::Miss;
             }
         }
 
@@ -188,7 +195,7 @@ impl AABB {
             tmin = linalg::fmax(t0, tmin);
             tmax = linalg::fmin(t1, tmax);
             if tmax < tmin {
-                return false;
+                return RaycastResult::Miss;
             }
         }
 
@@ -198,11 +205,17 @@ impl AABB {
             tmin = linalg::fmax(t0, tmin);
             tmax = linalg::fmin(t1, tmax);
             if tmax < tmin {
-                return false;
+                return RaycastResult::Miss;
             }
         }
 
-        true
+        // TODO: AABB normal generation
+        RaycastResult::Hit(Intersection {
+            t: tmin,
+            u: 0.0,
+            v: 0.0,
+            n: Vec3::new(0.0),
+        })
     }
 
     // Construct AABB with inclusive boundaries
@@ -333,8 +346,12 @@ impl AABB {
 // NOTE: Phong reflection model as described by the .MTL format
 #[derive(Debug, Clone, Copy)]
 struct Material {
-    diffuse: Vec3,
+    // Oren-Nayar diffuse reflection model
+    diffuse: Vec3, // Albedo
     emission: Vec3,
+    // Cook-Torrence specular reflection model
+    // specular: Vec3,
+    // roughness: f32,
 }
 
 impl Material {
@@ -345,16 +362,16 @@ impl Material {
         }
     }
 
-    fn shade(&self, scene: &Scene, ray: Ray, t: f32, u: f32, v: f32, triangle: Triangle) -> Vec3 {
+    fn shade(&self, scene: &Scene, ray: Ray, intersection: Intersection) -> Vec3 {
         if ray.depth == RAY_DEPTH_MAX {
             return self.emission;
         }
 
-        let n = triangle.normal_at(u, v);
+        let n = intersection.n;
         let d = linalg::random_point_on_hemisphere(n);
 
         let next_ray = Ray {
-            origin: ray.at(t) + (d * Vec3::new(0.0001)),
+            origin: ray.at(intersection.t) + (d * Vec3::new(0.0001)),
             direction: d,
             depth: ray.depth + 1,
         };
@@ -430,20 +447,23 @@ impl Octree {
         let mut result = RaycastResult::Miss;
         // FIXME: Searching for ALL triangles hits in the AABBs measure AABB intersection t
         for (i, aabb) in self.aabbs.iter().enumerate() {
-            if aabb.intersects(ray) {
-                for triangle in &self.triangles[i] {
-                    let res = triangle.intersects(ray);
-                    match res {
-                        RaycastResult::Hit { t, u: _, v: _, triangle: _ } => {
-                            if t < t0 && t > std::f32::EPSILON {
-                                result = res;
-                                t0 = t;
+            match aabb.intersects(ray) {
+                RaycastResult::Hit(intersection) => {
+                    for triangle in &self.triangles[i] {
+                        let res = triangle.intersects(ray);
+                        match res {
+                            RaycastResult::Hit(intersection) => {
+                                if intersection.t < t0 && intersection.t > std::f32::EPSILON {
+                                    result = res;
+                                    t0 = intersection.t;
+                                }
                             }
-                        }
-                        RaycastResult::Miss => continue,
-                    };
+                            RaycastResult::Miss => continue,
+                        };
+                    }
                 }
-            }
+                RaycastResult::Miss => continue,
+            };
         }
         result
     }
@@ -466,7 +486,7 @@ impl Scene {
         let (models, materials) = obj.unwrap();
 
         println!("# of models: {}", models.len());
-        println!("$ of materials: {}", materials.len());
+        println!("# of materials: {}", materials.len());
 
         for (i, m) in models.iter().enumerate() {
             let mesh = &m.mesh;
@@ -533,70 +553,69 @@ impl Scene {
                 material.diffuse = Vec3 {
                     x: materials[mid].diffuse[0],
                     y: materials[mid].diffuse[1],
-                        z: materials[mid].diffuse[2],
-                    };
+                    z: materials[mid].diffuse[2],
+                };
 
-                    let emission = &materials[mid].unknown_param["Ke"];
-                    if emission.len() > 0 {
-                        let strs = emission.split(" ").collect::<Vec<_>>();
-                        if strs.len() == 3 {
-                            let mut e = vec![0.0; 3];
+                let emission = &materials[mid].unknown_param["Ke"];
+                if emission.len() > 0 {
+                    let strs = emission.split(" ").collect::<Vec<_>>();
+                    if strs.len() == 3 {
+                        let mut e = vec![0.0; 3];
 
-                            for (i, s) in strs.iter().enumerate() {
-                                if let Ok(num) = s.parse::<f32>() {
-                                    e[i] = num;
-                                }
+                        for (i, s) in strs.iter().enumerate() {
+                            if let Ok(num) = s.parse::<f32>() {
+                                e[i] = num;
                             }
-
-                            material.emission = Vec3 {
-                                x: e[0],
-                                y: e[1],
-                                z: e[2],
-                            };
                         }
+
+                        material.emission = Vec3 {
+                            x: e[0],
+                            y: e[1],
+                            z: e[2],
+                        };
                     }
                 }
-
-                // FIXME: Octree construction does not work ...
-                let dimension = 4;
-                let octree = Octree::new(dimension, triangles, material);
-                octrees.push(octree);
             }
 
-            let end = std::time::Instant::now();
-            let diff = end - start;
-            println!(
-                "Scene loaded in: {}.{} secs",
-                diff.as_secs(),
-                diff.subsec_millis()
-            );
-
-            Scene { octrees: octrees }
+            let dimension = 4;
+            let octree = Octree::new(dimension, triangles, material);
+            octrees.push(octree);
         }
 
-        fn trace_background(&self, ray: Ray) -> Vec3 {
-            let t = 0.5 * (ray.direction.y + 1.0);
-            let white = Vec3::new(1.0);
-            let light_blue = Vec3 {
-                x: 0.5,
-                y: 0.7,
-                z: 1.0,
-            };
-            ((1.0 - t) * white + t * light_blue)
-        }
+        let end = std::time::Instant::now();
+        let diff = end - start;
+        println!(
+            "Scene loaded in: {}.{} secs",
+            diff.as_secs(),
+            diff.subsec_millis()
+        );
 
-        fn trace(&self, ray: Ray) -> Vec3 {
-            let mut t0 = std::f32::MAX;
-            let mut result = RaycastResult::Miss;
-            let mut material = Material::new();
+        Scene { octrees: octrees }
+    }
 
-            // TODO: Create a octree hierarchy (similiar to a BVH)
-            for octree in &self.octrees {
-                let res = octree.intersects(&ray);
-                match res {
-                    RaycastResult::Hit { t, u: _, v: _, triangle: _ } => {
-                    if t < t0 && t > std::f32::EPSILON {
-                        t0 = t;
+    fn trace_background(&self, ray: Ray) -> Vec3 {
+        let t = 0.5 * (ray.direction.y + 1.0);
+        let white = Vec3::new(1.0);
+        let light_blue = Vec3 {
+            x: 0.5,
+            y: 0.7,
+            z: 1.0,
+        };
+        ((1.0 - t) * white + t * light_blue)
+    }
+
+    fn trace(&self, ray: Ray) -> Vec3 {
+        let mut t0 = std::f32::MAX;
+        let mut result = RaycastResult::Miss;
+        let mut material = Material::new();
+
+        // TODO: Create a octree hierarchy instead of linear search?
+        for octree in &self.octrees {
+            let res = octree.intersects(&ray);
+            match res {
+                RaycastResult::Hit(intersection) => {
+                    if intersection.t < t0 && intersection.t > std::f32::EPSILON {
+                        t0 = intersection.t;
                         material = octree.material;
                         result = res;
                     }
@@ -606,9 +625,7 @@ impl Scene {
         }
 
         match result {
-            RaycastResult::Hit { t, u, v, triangle } => {
-                material.shade(&self, ray, t, u, v, triangle)
-            }
+            RaycastResult::Hit(intersection) => material.shade(&self, ray, intersection),
             RaycastResult::Miss => self.trace_background(ray),
         }
     }
