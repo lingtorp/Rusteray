@@ -1,5 +1,11 @@
 extern crate rand;
-use rand_distr::{Distribution, UnitSphere};
+use rand_distr::{Uniform, Distribution, UnitSphere};
+
+pub fn random_0_1() -> f32 {
+    let step = Uniform::new(0.0, 1.0);
+    let mut rng = rand::thread_rng();
+    return step.sample(&mut rng);
+}
 
 // Returns random point on the unit sphere's surface
 pub fn random_point_on_sphere() -> Vec3 {
