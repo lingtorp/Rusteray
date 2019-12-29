@@ -1,5 +1,5 @@
 extern crate rand;
-use rand_distr::{Uniform, Distribution, UnitSphere};
+use rand_distr::{Distribution, Uniform, UnitSphere};
 
 pub fn random_0_1() -> f32 {
     let step = Uniform::new(0.0, 1.0);

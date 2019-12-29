@@ -19,7 +19,7 @@ extern crate num_cpus;
 
 const WINDOW_WIDTH: usize = 400;
 const WINDOW_HEIGHT: usize = 400;
-const SAMPLE_COUNT: usize = 5;
+const SAMPLES_PER_PIXEL: usize = 5;
 const RAY_DEPTH_MAX: usize = 5;
 
 #[derive(Debug, Copy, Clone)]
@@ -71,10 +71,10 @@ impl Camera {
 
 #[derive(Debug, Clone, Copy)]
 struct Intersection {
-    t: f32,
-    u: f32,
-    v: f32,
-    n: Vec3,
+    t: f32,  // ray.at(t) for intersection
+    u: f32,  // Barycentric triangle coordinate
+    v: f32,  // Barycentric triangle coordinate
+    n: Vec3, // Normal vector at intersection
 }
 
 #[derive(Debug)]
@@ -448,7 +448,7 @@ impl Octree {
         // FIXME: Searching for ALL triangles hits in the AABBs measure AABB intersection t
         for (i, aabb) in self.aabbs.iter().enumerate() {
             match aabb.intersects(ray) {
-                RaycastResult::Hit(intersection) => {
+                RaycastResult::Hit(_intersection) => {
                     for triangle in &self.triangles[i] {
                         let res = triangle.intersects(ray);
                         match res {
@@ -557,7 +557,7 @@ impl Scene {
                 };
 
                 let emission = &materials[mid].unknown_param["Ke"];
-                if emission.len() > 0 {
+                if !emission.is_empty() {
                     let strs = emission.split(" ").collect::<Vec<_>>();
                     if strs.len() == 3 {
                         let mut e = vec![0.0; 3];
@@ -698,7 +698,15 @@ fn main() {
     println!("Using {} threads in threadpool ...", num_cpus::get());
     let pool = ThreadPool::new(num_cpus::get());
 
+    println!(
+        " WINDOW: {}x{} \n RAY DEPTH MAX: {} \n SAMPLES PER PIXEL (SPP): {}\n",
+        WINDOW_WIDTH, WINDOW_HEIGHT, RAY_DEPTH_MAX, SAMPLES_PER_PIXEL
+    );
+
     let (tx, rx) = std::sync::mpsc::channel();
+
+    let mut diff_sum = std::time::Duration::new(0, 0);
+    let mut frames = 0;
 
     while window.is_open() && !window.is_key_down(Key::Escape) {
         let start = std::time::Instant::now();
@@ -711,7 +719,7 @@ fn main() {
                 pool.execute(move || {
                     let mut rng = rand::thread_rng();
                     let mut color = Vec3::zero();
-                    for _ in 0..SAMPLE_COUNT {
+                    for _ in 0..SAMPLES_PER_PIXEL {
                         // Flipped variable t s.t y+ axis is up
                         let r: f32 = rng.gen();
                         let s = ((x as f32) + r) / (WINDOW_WIDTH as f32);
@@ -719,7 +727,7 @@ fn main() {
                         let ray = camera.ray(s, t);
                         color = color + scene.trace(ray);
                     }
-                    color = color / (SAMPLE_COUNT as f32);
+                    color = color / (SAMPLES_PER_PIXEL as f32);
                     tx.send((x, y, encode_color(Encoding::ARGB, color)))
                         .expect("Failed to send pixel!");
                 });
@@ -740,8 +748,18 @@ fn main() {
             diff.subsec_millis()
         );
 
-        println!("{}", title);
         window.set_title(&title);
+
+        frames += 1;
+        diff_sum += diff;
+        let info = format!(
+            "{}.{} s/frame, {}.{} avg",
+            diff.as_secs(),
+            diff.subsec_millis(),
+            (diff_sum / frames).as_secs(),
+            (diff_sum / frames).subsec_millis()
+        );
+        println!("{}", info);
 
         window.update_with_buffer(&buffer).unwrap();
     }
