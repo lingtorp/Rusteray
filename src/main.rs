@@ -10,6 +10,8 @@ use rand::prelude::*;
 mod linalg;
 use linalg::Vec3;
 
+mod brdf;
+
 use std::sync::Arc;
 
 extern crate threadpool;
