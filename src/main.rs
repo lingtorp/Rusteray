@@ -74,9 +74,17 @@ impl Camera {
 #[derive(Debug, Clone, Copy)]
 struct Intersection {
     t: f32,  // ray.at(t) for intersection
-    u: f32,  // Barycentric triangle coordinate
-    v: f32,  // Barycentric triangle coordinate
-    n: Vec3, // Normal vector at intersection
+    normal: Vec3, // Interpolated normal vector at intersection
+    tangent: Vec3, // Interpolated tangent vector at intersection
+    bitangent: Vec3, // Interpolated tangent vector at intersection
+}
+
+impl Intersection {
+    // Transforms to intersection shading space
+    // Shading space = | (x: tangent, y: normal, z: bitangent) |
+    fn to_shading(&self, v: Vec3) -> Vec3 {
+        Vec3::from(self.tangent.dot(v), self.normal.dot(v), self.bitangent.dot(v)).normalize()
+    }
 }
 
 #[derive(Debug)]
@@ -106,6 +114,12 @@ struct Triangle {
     n0: Vec3,
     n1: Vec3,
     n2: Vec3,
+    t0: Vec3,
+    t1: Vec3,
+    t2: Vec3,
+    b0: Vec3,
+    b1: Vec3,
+    b2: Vec3,
 }
 
 impl Triangle {
@@ -145,16 +159,27 @@ impl Triangle {
 
         let intersection = Intersection {
             t: t,
-            u: u,
-            v: v,
-            n: self.normal_at(u, v),
+            normal: self.normal_at(u, v),
+            tangent: self.tangent_at(u, v),
+            bitangent: self.bitangent_at(u, v),
         };
 
         RaycastResult::Hit(intersection)
     }
 
+    // Returns normal interpolated across the triangle
     fn normal_at(&self, u: f32, v: f32) -> Vec3 {
         ((1.0 - u - v) * self.n0 + u * self.n1 + v * self.n2).normalize()
+    }
+
+    // Returns the tangent interpolated across the triangle
+    fn tangent_at(&self, u: f32, v: f32) -> Vec3 {
+        ((1.0 - u - v) * self.t0 + u * self.t1 + v * self.t2).normalize()
+    }
+
+    // Returns the bitangent interpolated across the triangle
+    fn bitangent_at(&self, u: f32, v: f32) -> Vec3 {
+        ((1.0 - u - v) * self.b0 + u * self.b1 + v * self.b2).normalize()
     }
 }
 
@@ -211,12 +236,12 @@ impl AABB {
             }
         }
 
-        // TODO: AABB normal generation
+        // TODO: AABB normal, tangent, bitangent generation
         RaycastResult::Hit(Intersection {
             t: tmin,
-            u: 0.0,
-            v: 0.0,
-            n: Vec3::new(0.0),
+            normal: Vec3::zero(),
+            tangent: Vec3::zero(),
+            bitangent: Vec3::zero(),
         })
     }
 
@@ -317,7 +342,7 @@ impl AABB {
         {
             return true;
         }
-        return false;
+        false
     }
 
     fn subdivide(&self, dimension: usize) -> Vec<AABB> {
@@ -345,13 +370,10 @@ impl AABB {
     }
 }
 
-// NOTE: Phong reflection model as described by the .MTL format
-#[derive(Debug, Clone, Copy)]
 struct Material {
-    // Oren-Nayar diffuse reflection model
-    diffuse: Vec3, // Albedo
     emission: Vec3,
-    // Cook-Torrence specular reflection model
+    diffuse_brdf: Box<brdf::BRDF>,
+    // TODO: Cook-Torrence specular reflection model
     // specular: Vec3,
     // roughness: f32,
 }
@@ -359,8 +381,8 @@ struct Material {
 impl Material {
     fn new() -> Material {
         Material {
-            diffuse: Vec3::zero(),
             emission: Vec3::zero(),
+            diffuse_brdf: Box::new(brdf::Lambertian::new(Vec3::zero())),
         }
     }
 
@@ -369,7 +391,7 @@ impl Material {
             return self.emission;
         }
 
-        let n = intersection.n;
+        let n = intersection.normal;
         let d = linalg::random_point_on_hemisphere(n);
 
         let next_ray = Ray {
@@ -380,14 +402,16 @@ impl Material {
 
         // NOTE: If diffuse reflectance exceeds 1 / PI it will reflect more light than it receives ..
         // TODO: Importance sampling the BRDF and lights
+        // TODO: Explicit light sampling / next event estimation
+        // TODO: Split direct + indirect
+        // TODO: Russian roulette termination (min bounds?)
 
-        let brdf = std::f32::consts::FRAC_1_PI; // Assuming Lambertian material always
-        let pdf_inv = 1.0 / std::f32::consts::FRAC_2_PI;
-        self.emission + d.dot(n) * brdf * pdf_inv * self.diffuse * scene.trace(next_ray)
+        let brdf = self.diffuse_brdf.eval(intersection.to_shading(d), intersection.to_shading(-ray.direction));
+        // println!("{:?}", brdf);
+        self.emission + d.dot(n) * brdf * scene.trace(next_ray)
     }
 }
 
-#[derive(Debug)]
 struct Octree {
     dimension: usize,
     aabbs: Vec<AABB>,
@@ -510,7 +534,7 @@ impl Scene {
 
             let mut triangles = Vec::new();
             for idxs in mesh.indices.chunks(3) {
-                let mut v = [Vec3::default(); 3];
+                let mut v = [Vec3::zero(); 3];
                 for i in 0..3 {
                     let idx = idxs[i] as usize;
                     let x = mesh.positions[3 * idx];
@@ -532,9 +556,26 @@ impl Scene {
                         let x = mesh.normals[3 * idx];
                         let y = mesh.normals[3 * idx + 1];
                         let z = mesh.normals[3 * idx + 2];
-                        n[i] = Vec3 { x: x, y: y, z: z }
+                        n[i] = Vec3 { x: x, y: y, z: z }.normalize();
                     }
                 }
+
+                // Compute temp. bitangents
+                let mut b = [Vec3::zero(); 3];
+                b[0] = n[0].cross(v[1] - v[0]).normalize();
+                b[1] = n[1].cross(v[2] - v[1]).normalize();
+                b[2] = n[2].cross(v[0] - v[2]).normalize();
+
+                // Compute tangents
+                let mut t = [Vec3::zero(); 3];
+                t[0] = b[0].cross(n[0]).normalize();
+                t[1] = b[1].cross(n[1]).normalize();
+                t[2] = b[2].cross(n[2]).normalize();
+
+                // Recompute final bitangents
+                b[0] = t[0].cross(n[0]).normalize();
+                b[1] = t[1].cross(n[1]).normalize();
+                b[2] = t[2].cross(n[2]).normalize();
 
                 triangles.push(Triangle {
                     v0: v[0],
@@ -543,20 +584,27 @@ impl Scene {
                     n0: n[0],
                     n1: n[1],
                     n2: n[2],
+                    t0: t[0],
+                    t1: t[1],
+                    t2: t[2],
+                    b0: b[0],
+                    b1: b[1],
+                    b2: b[2],
                 });
             }
 
-            let mut material = Material {
-                diffuse: Vec3::zero(),
-                emission: Vec3::zero(),
-            };
-
             if let Some(mid) = mesh.material_id {
-                material.diffuse = Vec3 {
+                let mut material: Material = Material::new();
+
+                let diffuse = Vec3 {
                     x: materials[mid].diffuse[0],
                     y: materials[mid].diffuse[1],
                     z: materials[mid].diffuse[2],
                 };
+
+                let diffuse_brdf = brdf::OrenNayar::new(diffuse, 0.1);
+                // let diffuse_brdf = brdf::Lambertian::new(diffuse);
+                material.diffuse_brdf = Box::new(diffuse_brdf);
 
                 let emission = &materials[mid].unknown_param["Ke"];
                 if !emission.is_empty() {
@@ -577,11 +625,11 @@ impl Scene {
                         };
                     }
                 }
-            }
 
-            let dimension = 4;
-            let octree = Octree::new(dimension, triangles, material);
-            octrees.push(octree);
+                let dimension = 1;
+                let octree = Octree::new(dimension, triangles, material);
+                octrees.push(octree);
+            }
         }
 
         let end = std::time::Instant::now();
@@ -609,7 +657,7 @@ impl Scene {
     fn trace(&self, ray: Ray) -> Vec3 {
         let mut t0 = std::f32::MAX;
         let mut result = RaycastResult::Miss;
-        let mut material = Material::new();
+        let mut material = &Material::new();
 
         // TODO: Create a octree hierarchy instead of linear search?
         for octree in &self.octrees {
@@ -618,7 +666,7 @@ impl Scene {
                 RaycastResult::Hit(intersection) => {
                     if intersection.t < t0 && intersection.t > std::f32::EPSILON {
                         t0 = intersection.t;
-                        material = octree.material;
+                        material = &octree.material;
                         result = res;
                     }
                 }
@@ -678,20 +726,20 @@ fn main() {
     let filepath = format!(
         "{}{}",
         directory.to_str().unwrap_or_default(),
-        "/models/rust-logo/rust_logo.obj"
+        "/models/cornell_box/cornell_box_empty.obj"
     );
     let scene = Arc::new(Scene::new(&filepath));
 
     // FIXME: From one axis does not work
     let from = Vec3 {
         x: 0.0,
-        y: 2.0,
-        z: 2.0,
+        y: 1.0,
+        z: 2.5,
     };
 
     let to = Vec3 {
         x: 0.0,
-        y: 0.0,
+        y: 1.0,
         z: 0.0,
     };
 
