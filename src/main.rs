@@ -75,9 +75,9 @@ impl Camera {
 
 #[derive(Debug, Clone, Copy)]
 struct Intersection {
-    t: f32,  // ray.at(t) for intersection
-    normal: Vec3, // Interpolated normal vector at intersection
-    tangent: Vec3, // Interpolated tangent vector at intersection
+    t: f32,          // ray.at(t) for intersection
+    normal: Vec3,    // Interpolated normal vector at intersection
+    tangent: Vec3,   // Interpolated tangent vector at intersection
     bitangent: Vec3, // Interpolated tangent vector at intersection
 }
 
@@ -85,7 +85,12 @@ impl Intersection {
     // Transforms to intersection shading space
     // Shading space = | (x: tangent, y: normal, z: bitangent) |
     fn to_shading(&self, v: Vec3) -> Vec3 {
-        Vec3::from(self.tangent.dot(v), self.normal.dot(v), self.bitangent.dot(v)).normalize()
+        Vec3::from(
+            self.tangent.dot(v),
+            self.normal.dot(v),
+            self.bitangent.dot(v),
+        )
+        .normalize()
     }
 }
 
@@ -408,7 +413,10 @@ impl Material {
         // TODO: Split direct + indirect
         // TODO: Russian roulette termination (min bounds?)
 
-        let brdf = self.diffuse_brdf.eval(intersection.to_shading(d), intersection.to_shading(-ray.direction));
+        let brdf = self.diffuse_brdf.eval(
+            intersection.to_shading(d),
+            intersection.to_shading(-ray.direction),
+        );
         // println!("{:?}", brdf);
         self.emission + d.dot(n) * brdf * scene.trace(next_ray)
     }
