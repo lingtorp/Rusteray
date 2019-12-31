@@ -7,6 +7,8 @@ use std::path::Path;
 extern crate rand;
 use rand::prelude::*;
 
+extern crate indicatif;
+
 mod linalg;
 use linalg::Vec3;
 
@@ -745,11 +747,11 @@ fn main() {
 
     let camera = Camera::new(50.0, from, to);
 
-    println!("Using {} threads in threadpool ...", num_cpus::get());
+    println!("Using {} threads in threadpool ... \n", num_cpus::get());
     let pool = ThreadPool::new(num_cpus::get());
 
     println!(
-        " WINDOW: {}x{} \n RAY DEPTH MAX: {} \n SAMPLES PER PIXEL (SPP): {}\n",
+        "WINDOW: {}x{} \nRAY DEPTH MAX: {} \nSAMPLES PER PIXEL (SPP): {}\n",
         WINDOW_WIDTH, WINDOW_HEIGHT, RAY_DEPTH_MAX, SAMPLES_PER_PIXEL
     );
 
@@ -784,10 +786,19 @@ fn main() {
             }
         }
 
+        // Update and display progress bar - uncomment for small perf. inc.
+        let progress_bar = indicatif::ProgressBar::new((WINDOW_WIDTH * WINDOW_HEIGHT) as u64);
+        progress_bar.set_style(
+            indicatif::ProgressStyle::default_bar()
+                .template("{spinner:.green} [{elapsed_precise:.yellow}] [{wide_bar:.bold.green/blue}] {percent}% ({eta_precise:.yellow})")
+                .progress_chars("=>-"),
+        );
         for _ in 0..WINDOW_WIDTH * WINDOW_HEIGHT {
             let (x, y, pixel) = rx.recv().unwrap_or_default();
             buffer[y * WINDOW_WIDTH + x] = pixel;
+            progress_bar.inc(1);
         }
+        progress_bar.finish();
 
         let end = std::time::Instant::now();
         let diff = end - start;
@@ -803,7 +814,8 @@ fn main() {
         frames += 1;
         diff_sum += diff;
         let info = format!(
-            "{}.{} s/frame, {}.{} avg",
+            "- Frame #{}: {}.{} s/frame, {}.{} avg \n",
+            frames,
             diff.as_secs(),
             diff.subsec_millis(),
             (diff_sum / frames).as_secs(),
