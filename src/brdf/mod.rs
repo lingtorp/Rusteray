@@ -44,22 +44,27 @@ impl OrenNayar {
         let sigma2 = roughness * roughness;
         let a = 1.0 - 0.5 * sigma2 / (sigma2 + 0.33);
         let b = 0.45 * sigma2 / (sigma2 + 0.09);
-        OrenNayar {
-            albedo,
-            a,
-            b,
-        }
+        OrenNayar { albedo, a, b }
     }
 }
 
 impl BRDF for OrenNayar {
-    // TODO: Need to take phi to accound since the diffuse reflection is not symmetric? Maybe not?
     fn eval(&self, w_i: Vec3, w_r: Vec3) -> Vec3 {
+        // TODO: Phi calculations not 100% correct?
+        let sign = |s: f32| -> f32 {
+            if s < 0.0 {
+                -1.0
+            } else {
+                1.0
+            }
+        };
+
+        let phi_i = sign(w_i.dot(Vec3::z())) * std::f32::consts::PI * (1.0 - w_i.dot(Vec3::x()));
+        let phi_r = sign(w_r.dot(Vec3::z())) * std::f32::consts::PI * (1.0 - w_r.dot(Vec3::x()));
+        let max_cos = linalg::fmax(0.0, (phi_r - phi_i).cos());
+
         let theta_i = w_i.dot(Vec3::y());
         let theta_r = w_r.dot(Vec3::y());
-
-        let max_cos = linalg::fmax(0.0, (theta_i - theta_r).cos());
-
         let alpha = linalg::fmax(theta_i, theta_r);
         let beta = linalg::fmin(theta_i, theta_r);
 
