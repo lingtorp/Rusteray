@@ -10,11 +10,7 @@ pub struct Vec3 {
 
 impl Vec3 {
     pub fn from(x: f32, y: f32, z: f32) -> Vec3 {
-        Vec3 {
-            x: x,
-            y: y,
-            z: z,
-        }
+        Vec3 { x: x, y: y, z: z }
     }
 
     pub fn new_from(v: Vec3) -> Vec3 {
