@@ -1,6 +1,7 @@
 # Rusteray
 ![](screenshots/oren-nayar-1000spp.png)
-Rusteray - a work in progress physically based path tracer written in Rust.
+
+Rusteray, a physically based path tracer written in Rust.
 
 - [X] BRDF support: Lambertian, Oren-Nayar 
 - [X] .obj model support
