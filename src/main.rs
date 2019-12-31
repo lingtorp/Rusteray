@@ -774,7 +774,6 @@ fn main() {
         for x in 0..WINDOW_WIDTH {
             for y in 0..WINDOW_HEIGHT {
                 let tx = tx.clone();
-                let camera = camera.clone();
                 let scene = Arc::clone(&scene);
                 pool.execute(move || {
                     let mut rng = rand::thread_rng();
