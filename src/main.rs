@@ -692,13 +692,15 @@ impl Scene {
 }
 
 enum Encoding {
-    ARGB,
+    RGB { r: f32, g: f32, b: f32 }, // RGB with 32b float/channel
+    ARGB(u32), // ARGB with 8 byte/channel
 }
 
-fn encode_color(encoding: Encoding, mut color: Vec3) -> u32 {
+// Encodes the color and packing it in a Encoding enum
+fn encode_color(encoding: Encoding, mut color: Vec3) -> Encoding {
+    // TODO: Implement f32.clamp and refactor this, used to avoid fireflies
     match encoding {
-        Encoding::ARGB => {
-            // TODO: Implement f32.clamp and refactor this, used to avoid fireflies
+        Encoding::ARGB(_) => {
             color.x = if color.x > 1.0 { 1.0 } else { color.x };
             color.y = if color.y > 1.0 { 1.0 } else { color.y };
             color.z = if color.z > 1.0 { 1.0 } else { color.z };
@@ -714,14 +716,19 @@ fn encode_color(encoding: Encoding, mut color: Vec3) -> u32 {
             pixel += ir << 16;
             pixel += ig << 8;
             pixel += ib;
-            pixel
+            Encoding::ARGB(pixel)
         }
+        Encoding::RGB { r: _, g: _, b: _ } => Encoding::RGB {
+            r: color.x,
+            g: color.y,
+            b: color.z,
+        },
     }
 }
 
 // TODO: Use benchmarks to test performance of trace, shade, etc
 fn main() {
-    let mut buffer: Vec<u32> = vec![0; WINDOW_WIDTH * WINDOW_HEIGHT];
+    let mut screen_buffer: Vec<u32> = vec![0; WINDOW_WIDTH * WINDOW_HEIGHT];
 
     let mut window = Window::new(
         "Rusteray",
@@ -733,11 +740,19 @@ fn main() {
         panic!("{}", e);
     });
 
+    // Setup Intel OpenImageDenoise library
+    let mut device = oidn::Device::new();
+    let mut filter = oidn::RayTracing::new(&mut device);
+    filter.set_img_dims(WINDOW_WIDTH, WINDOW_HEIGHT);
+
+    let mut filter_in_buffer: Vec<f32> = vec![0.0; 3 * WINDOW_WIDTH * WINDOW_HEIGHT];
+    let mut filter_out_buffer: Vec<f32> = vec![0.0; 3 * WINDOW_WIDTH * WINDOW_HEIGHT];
+
     let directory = std::env::current_dir().unwrap_or_default();
     let filepath = format!(
         "{}{}",
         directory.to_str().unwrap_or_default(),
-        "/models/cornell_box/cornell_box_empty.obj"
+        "/models/cornell_box/cornell_box.obj"
     );
     let scene = Arc::new(Scene::new(&filepath));
 
@@ -745,7 +760,7 @@ fn main() {
     let from = Vec3 {
         x: 0.0,
         y: 1.0,
-        z: 2.5,
+        z: 3.1,
     };
 
     let to = Vec3 {
@@ -759,6 +774,7 @@ fn main() {
     println!("Using {} threads in threadpool ... \n", num_cpus::get());
     let pool = ThreadPool::new(num_cpus::get());
 
+    let denoise = true; // Whether or not to denoise the image
     println!(
         "WINDOW: {}x{} \nRAY DEPTH MAX: {} \nSAMPLES PER PIXEL (SPP): {}\n",
         WINDOW_WIDTH, WINDOW_HEIGHT, RAY_DEPTH_MAX, SAMPLES_PER_PIXEL
@@ -788,24 +804,82 @@ fn main() {
                         color = color + scene.trace(ray);
                     }
                     color = color / (SAMPLES_PER_PIXEL as f32);
-                    tx.send((x, y, encode_color(Encoding::ARGB, color)))
-                        .expect("Failed to send pixel!");
+                    tx.send((x, y, color)).expect("Failed to send pixel!");
                 });
             }
         }
 
         // Update and display progress bar - uncomment for small perf. inc.
-        let progress_bar = indicatif::ProgressBar::new((WINDOW_WIDTH * WINDOW_HEIGHT) as u64);
+        let work_units = if denoise {
+            2 * WINDOW_WIDTH * WINDOW_HEIGHT
+        } else {
+            WINDOW_WIDTH * WINDOW_HEIGHT
+        };
+        let progress_bar = indicatif::ProgressBar::new(work_units as u64);
         progress_bar.set_style(
             indicatif::ProgressStyle::default_bar()
                 .template("{spinner:.green} [{elapsed_precise:.yellow}] [{wide_bar:.bold.green/blue}] {percent}% ({eta_precise:.yellow})")
                 .progress_chars("=>-"),
         );
+
         for _ in 0..WINDOW_WIDTH * WINDOW_HEIGHT {
             let (x, y, pixel) = rx.recv().unwrap_or_default();
-            buffer[y * WINDOW_WIDTH + x] = pixel;
+
+            // Encode as RGB32f
+            match encode_color(
+                Encoding::RGB {
+                    r: 0.0,
+                    g: 0.0,
+                    b: 0.0,
+                },
+                pixel,
+            ) {
+                Encoding::RGB { r, g, b } => {
+                    let idx = 3 * (y * WINDOW_WIDTH + x);
+                    filter_in_buffer[idx + 0] = r;
+                    filter_in_buffer[idx + 1] = g;
+                    filter_in_buffer[idx + 2] = b;
+                }
+                _ => (),
+            };
+
+            if !denoise {
+                // Encode as ARGB8
+                screen_buffer[y * WINDOW_WIDTH + x] = match encode_color(Encoding::ARGB(0), pixel) {
+                    Encoding::ARGB(encoded) => encoded,
+                    _ => 0,
+                };
+            }
+
             progress_bar.inc(1);
         }
+
+        // Denoise
+        if denoise {
+            filter.execute(&filter_in_buffer[..], &mut filter_out_buffer[..]);
+
+            if let Err(e) = device.get_error() {
+                println!("Error denoising image: {}", e.1);
+            }
+
+            // Encoding conversion
+            for x in 0..WINDOW_WIDTH {
+                for y in 0..WINDOW_HEIGHT {
+                    let idx = 3 * (y * WINDOW_WIDTH + x);
+                    let r = filter_out_buffer[idx + 0];
+                    let g = filter_out_buffer[idx + 1];
+                    let b = filter_out_buffer[idx + 2];
+                    let pixel = Vec3::from(r, g, b);
+                    screen_buffer[y * WINDOW_WIDTH + x] =
+                        match encode_color(Encoding::ARGB(0), pixel) {
+                            Encoding::ARGB(encoded) => encoded,
+                            _ => 0,
+                        };
+                    progress_bar.inc(1);
+                }
+            }
+        }
+
         progress_bar.finish();
 
         let end = std::time::Instant::now();
@@ -831,6 +905,6 @@ fn main() {
         );
         println!("{}", info);
 
-        window.update_with_buffer(&buffer).unwrap();
+        window.update_with_buffer(&screen_buffer).unwrap();
     }
 }
