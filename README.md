@@ -3,10 +3,12 @@
 
 Rusteray, a physically based path tracer written in Rust.
 
+## Features
 - [X] BRDF support: Lambertian, Oren-Nayar 
 - [X] .obj model support
 - [X] Multithreaded with a threadpool
 - [ ] JSON scene description
+- [ ] .gltf2 scene support?
 
 ## Showcase
 

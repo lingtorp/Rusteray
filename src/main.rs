@@ -458,8 +458,8 @@ impl Octree {
                     // Triangles may span several AABBs, must add to all
                     Containment::Partial => {
                         did_fit = true;
-                        partial_fits += 1;
                         aabb_triangles[i].push(triangle);
+                        partial_fits += 1;
                     }
                     Containment::None => continue,
                 }
@@ -719,6 +719,7 @@ fn encode_color(encoding: Encoding, mut color: Vec3) -> u32 {
     }
 }
 
+// TODO: Use benchmarks to test performance of trace, shade, etc
 fn main() {
     let mut buffer: Vec<u32> = vec![0; WINDOW_WIDTH * WINDOW_HEIGHT];
 
