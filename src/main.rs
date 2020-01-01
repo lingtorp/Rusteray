@@ -412,6 +412,7 @@ impl Material {
         // TODO: Explicit light sampling / next event estimation
         // TODO: Split direct + indirect
         // TODO: Russian roulette termination (min bounds?)
+        // TODO: Specular reflectance model/BRDF
 
         let brdf = self.diffuse_brdf.eval(
             intersection.to_shading(d),
