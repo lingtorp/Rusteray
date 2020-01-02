@@ -21,10 +21,12 @@ use threadpool::ThreadPool;
 
 extern crate num_cpus;
 
-const WINDOW_WIDTH: usize = 400;
-const WINDOW_HEIGHT: usize = 400;
-const SAMPLES_PER_PIXEL: usize = 5;
-const RAY_DEPTH_MAX: usize = 5;
+extern crate oidn;
+
+const WINDOW_WIDTH: usize = 600;
+const WINDOW_HEIGHT: usize = 600;
+const SAMPLES_PER_PIXEL: usize = 10;
+const RAY_DEPTH_MAX: usize = 10;
 
 #[derive(Debug, Copy, Clone)]
 struct Camera {
@@ -637,6 +639,7 @@ impl Scene {
                     }
                 }
 
+                // FIXME: Does not work in simple scenes for some unknown reason
                 let dimension = 1;
                 let octree = Octree::new(dimension, triangles, material);
                 octrees.push(octree);
@@ -727,6 +730,7 @@ fn encode_color(encoding: Encoding, mut color: Vec3) -> Encoding {
     }
 }
 
+// TODO: Spheres, define geometry mathematically, etc
 // TODO: Use benchmarks to test performance of trace, shade, etc
 fn main() {
     let mut screen_buffer: Vec<u32> = vec![0; WINDOW_WIDTH * WINDOW_HEIGHT];
