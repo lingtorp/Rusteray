@@ -19,7 +19,7 @@ Rusteray, a physically based path tracer written in Rust.
 
 | ![](screenshots/cornell-oren-nayar-10spp-denoised.png) |
 |:--:| 
-| ~00:00:16 - 10 samples per pixel | 
+| ~00:00:16 - 10 samples per pixel, denoised, no aux buffers | 
 
 ## TODOs
 - .gltf2 scene support?

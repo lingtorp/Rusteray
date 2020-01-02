@@ -730,6 +730,7 @@ fn encode_color(encoding: Encoding, mut color: Vec3) -> Encoding {
     }
 }
 
+// TODO: Use normals as aux. buffer for the denoising
 // TODO: Spheres, define geometry mathematically, etc
 // TODO: Use benchmarks to test performance of trace, shade, etc
 fn main() {
