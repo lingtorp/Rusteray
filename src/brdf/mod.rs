@@ -9,7 +9,7 @@ pub trait BRDF: Send + Sync {
 }
 
 // Lambertian BRDF
-// Desc:
+// Desc: Cosine distribution of light scattering a.k.a lambertian BRDF
 // Src:
 #[derive(Debug, Clone, Copy)]
 pub struct Lambertian {
