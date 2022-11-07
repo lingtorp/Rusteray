@@ -146,6 +146,24 @@ impl std::ops::Div<f32> for Vec3 {
     }
 }
 
+impl std::ops::Div<i32> for Vec3 {
+    type Output = Vec3;
+
+    fn div(self, rhs: i32) -> Vec3 {
+        let f = rhs as f32;
+        self / f
+    }
+}
+
+impl std::ops::Div<u32> for Vec3 {
+    type Output = Vec3;
+
+    fn div(self, rhs: u32) -> Vec3 {
+        let f = rhs as f32;
+        self / f
+    }
+}
+
 impl std::ops::Sub<Vec3> for Vec3 {
     type Output = Vec3;
 
@@ -155,6 +173,15 @@ impl std::ops::Sub<Vec3> for Vec3 {
             y: self.y - rhs.y,
             z: self.z - rhs.z,
         }
+    }
+}
+
+impl std::ops::Mul<i32> for Vec3 {
+    type Output = Vec3;
+
+    fn mul(self, rhs: i32) -> Vec3 {
+        let f = rhs as f32;
+        self * f
     }
 }
 
@@ -200,7 +227,8 @@ pub fn random_0_1() -> f32 {
     step.sample(&mut rng)
 }
 
-// Returns unit vector of a random vector oriented by the normal (n) on the positive hemisphere
+// NOTE: http://extremelearning.com.au/how-to-evenly-distribute-points-on-a-sphere-more-effectively-than-the-canonical-fibonacci-lattice/
+// Returns vector of a random uniformly chosen vector oriented by the normal (n) on the positive hemisphere
 pub fn random_point_on_hemisphere(n: Vec3) -> Vec3 {
     loop {
         let v: [f32; 3] = UnitSphere.sample(&mut rand::thread_rng());
