@@ -395,6 +395,12 @@ impl Material {
         }
     }
 
+    // NOTE: If diffuse reflectance exceeds 1 / PI it will reflect more light than it receives ..
+    // TODO: Importance sampling the BRDF and lights
+    // TODO: Explicit light sampling / next event estimation
+    // TODO: Split direct + indirect
+    // TODO: Russian roulette termination (min bounds?)
+    // TODO: Specular reflectance model/BRDF
     fn shade(&self, scene: &Scene, ray: Ray, intersection: Intersection) -> Vec3 {
         if ray.depth == RAY_DEPTH_MAX {
             return self.emission;
@@ -409,12 +415,6 @@ impl Material {
             depth: ray.depth + 1,
         };
 
-        // NOTE: If diffuse reflectance exceeds 1 / PI it will reflect more light than it receives ..
-        // TODO: Importance sampling the BRDF and lights
-        // TODO: Explicit light sampling / next event estimation
-        // TODO: Split direct + indirect
-        // TODO: Russian roulette termination (min bounds?)
-        // TODO: Specular reflectance model/BRDF
 
         let brdf = self.diffuse_brdf.eval(
             intersection.to_shading(d),
