@@ -782,17 +782,16 @@ fn main() {
 
     let mut diff_sum = std::time::Duration::new(0, 0);
     let mut frames = 1;
+    let mut rng = rand::thread_rng();
+    let mut noise = BlueNoise::<Pcg64Mcg>::new(1.0, 1.0, 0.02);
+    let points = noise
+        .with_seed(rng.gen())
+        .take(SAMPLES_PER_PIXEL as usize)
+        .collect::<Vec<_>>();
 
     let start_time = std::time::Instant::now();
     while window.is_open() && !window.is_key_down(Key::Escape) {
         let start = std::time::Instant::now();
-
-        let mut rng = rand::thread_rng();
-        let mut noise = BlueNoise::<Pcg64Mcg>::new(1.0, 1.0, 0.02);
-        let points = noise
-            .with_seed(rng.gen())
-            .take(SAMPLES_PER_PIXEL as usize)
-            .collect::<Vec<_>>();
 
         for x in 0..WINDOW_WIDTH {
             for y in 0..WINDOW_HEIGHT {
