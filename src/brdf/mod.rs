@@ -1,11 +1,29 @@
-use crate::linalg;
-use crate::linalg::Vec3;
+use std::f32::consts::FRAC_2_PI;
 
+use crate::linalg::Vec3;
+use crate::linalg::{self, random_0_1};
+
+// TODO: Needs access to blue noise or some low discrepencies noise source to sample uniformly
 pub trait BRDF: Send + Sync {
+    // Sample the BRDF in normalized shading space (x: tangent, y: normal, z: bitangent)
+    // wi: Incoming irradiance vector
+    // n  : Normal vector
+    // Return: Outgoing radiance vector importance sampled from the BRDF in shading space
+    fn sample(&self, wi: Vec3, n: Vec3) -> Vec3;
+
     // Evaluates the BRDF in normalized shading space (x: tangent, y: normal, z: bitangent)
-    // w_i: Incoming vector irradiance vector
-    // w_r: Outgoing vector of reflected radiance
-    fn eval(&self, w_i: Vec3, w_r: Vec3) -> Vec3;
+    // wi: Incoming irradiance vector
+    // n  : Normal vector
+    // wo: Outgoing vector of reflected radiance
+    // Return: Radiance out through the vector wo in shading space
+    fn eval(&self, wi: Vec3, n: Vec3, wo: Vec3) -> Vec3;
+
+    // Evaluates the probability density function in normalized shading space (x: tangent, y: normal, z: bitangent)
+    // wi: Incoming irradiance vector
+    // n  : Normal vector
+    // wo: Outgoing vector of reflected radiance
+    // Return: Probability of choosing wo when given wi & n in shading space
+    fn pdf(&self, wi: Vec3, n: Vec3, wo: Vec3) -> f32;
 }
 
 // Lambertian BRDF
@@ -23,8 +41,29 @@ impl Lambertian {
 }
 
 impl BRDF for Lambertian {
-    fn eval(&self, _w_i: Vec3, _w_r: Vec3) -> Vec3 {
-        self.albedo * std::f32::consts::FRAC_1_PI
+    fn sample(&self, _wi: Vec3, n: Vec3) -> Vec3 {
+        // TODO: Importance sample the Lambertian BRDF
+        linalg::random_point_on_hemisphere(n)
+
+        // FIXME: Returns vector in unit space should be in shading space
+        // let r = f32::sqrt(random_0_1());
+        // let theta = random_0_1() * 2.0 * std::f32::consts::PI;
+        // let psi = random_0_1() * std::f32::consts::FRAC_2_PI;
+
+        // let x = r * f32::cos(theta);
+        // let y = r * f32::sin(psi);
+
+        // // Project z up to the unit hemisphere
+        // let z = f32::sqrt(1.0 - x * x - y * y);
+        // Vec3 { x, y, z }.normalize()
+    }
+
+    fn eval(&self, _wi: Vec3, n: Vec3, wo: Vec3) -> Vec3 {
+        wo.dot(n) * self.albedo * std::f32::consts::FRAC_1_PI
+    }
+
+    fn pdf(&self, wi: Vec3, n: Vec3, wo: Vec3) -> f32 {
+        wo.dot(n) * std::f32::consts::FRAC_1_PI
     }
 }
 
@@ -49,7 +88,7 @@ impl OrenNayar {
 }
 
 impl BRDF for OrenNayar {
-    fn eval(&self, w_i: Vec3, w_r: Vec3) -> Vec3 {
+    fn eval(&self, wi: Vec3, _n: Vec3, wo: Vec3) -> Vec3 {
         // TODO: Phi calculations not 100% correct?
         let sign = |s: f32| -> f32 {
             if s < 0.0 {
@@ -59,17 +98,26 @@ impl BRDF for OrenNayar {
             }
         };
 
-        let phi_i = sign(w_i.dot(Vec3::z())) * std::f32::consts::PI * (1.0 - w_i.dot(Vec3::x()));
-        let phi_r = sign(w_r.dot(Vec3::z())) * std::f32::consts::PI * (1.0 - w_r.dot(Vec3::x()));
+        let phi_i = sign(wi.dot(Vec3::z())) * std::f32::consts::PI * (1.0 - wi.dot(Vec3::x()));
+        let phi_r = sign(wo.dot(Vec3::z())) * std::f32::consts::PI * (1.0 - wo.dot(Vec3::x()));
         let max_cos = linalg::fmax(0.0, (phi_r - phi_i).cos());
 
-        let theta_i = w_i.dot(Vec3::y());
-        let theta_r = w_r.dot(Vec3::y());
+        let theta_i = wi.dot(Vec3::y());
+        let theta_r = wo.dot(Vec3::y());
         let alpha = linalg::fmax(theta_i, theta_r);
         let beta = linalg::fmin(theta_i, theta_r);
 
         let brdf = self.a + (self.b * max_cos * alpha.sin() * beta.tan());
 
         self.albedo * std::f32::consts::FRAC_1_PI * brdf
+    }
+
+    fn sample(&self, _wi: Vec3, n: Vec3) -> Vec3 {
+        // TODO: Importance sample the Oren-Nayar BRDF
+        linalg::random_point_on_hemisphere(n)
+    }
+
+    fn pdf(&self, wi: Vec3, n: Vec3, wo: Vec3) -> f32 {
+        1.0
     }
 }

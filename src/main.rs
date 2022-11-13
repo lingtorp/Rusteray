@@ -2,6 +2,7 @@ extern crate minifb;
 use minifb::{Key, Window, WindowOptions};
 
 extern crate tobj;
+
 use std::path::Path;
 
 extern crate rand;
@@ -21,11 +22,23 @@ use threadpool::ThreadPool;
 
 extern crate num_cpus;
 
-extern crate oidn;
+use bluenoise::BlueNoise;
+use rand_pcg::Pcg64Mcg;
+
+use clap::Parser;
+
+/// Simple program to greet a person
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Number of frames to render
+    #[arg(short, long, default_value_t = 1)]
+    frames: u8,
+}
 
 const WINDOW_WIDTH: usize = 600;
 const WINDOW_HEIGHT: usize = 600;
-const SAMPLES_PER_PIXEL: usize = 10;
+const SAMPLES_PER_PIXEL: usize = 25;
 const RAY_DEPTH_MAX: usize = 10;
 
 #[derive(Debug, Copy, Clone)]
@@ -84,7 +97,7 @@ struct Intersection {
 }
 
 impl Intersection {
-    // Transforms to intersection shading space
+    // Transforms to intersection shading space from world space
     // Shading space = | (x: tangent, y: normal, z: bitangent) |
     fn to_shading(&self, v: Vec3) -> Vec3 {
         Vec3::from(
@@ -165,7 +178,6 @@ impl Triangle {
         if t < 0.0 {
             return RaycastResult::Miss;
         }
-
         let intersection = Intersection {
             t: t,
             normal: self.normal_at(u, v),
@@ -381,33 +393,27 @@ impl AABB {
 
 struct Material {
     emission: Vec3,
-    diffuse_brdf: Box<brdf::BRDF>,
-    // TODO: Cook-Torrence specular reflection model
-    // specular: Vec3,
-    // roughness: f32,
+    brdf: Box<dyn brdf::BRDF>,
 }
 
 impl Material {
     fn new() -> Material {
         Material {
             emission: Vec3::zero(),
-            diffuse_brdf: Box::new(brdf::Lambertian::new(Vec3::zero())),
+            brdf: Box::new(brdf::Lambertian::new(Vec3::zero())),
         }
     }
 
-    // NOTE: If diffuse reflectance exceeds 1 / PI it will reflect more light than it receives ..
-    // TODO: Importance sampling the BRDF and lights
-    // TODO: Explicit light sampling / next event estimation
-    // TODO: Split direct + indirect
-    // TODO: Russian roulette termination (min bounds?)
-    // TODO: Specular reflectance model/BRDF
     fn shade(&self, scene: &Scene, ray: Ray, intersection: Intersection) -> Vec3 {
         if ray.depth == RAY_DEPTH_MAX {
-            return self.emission;
+            return Vec3::zero();
         }
 
-        let n = intersection.normal;
-        let d = linalg::random_point_on_hemisphere(n);
+        // NOTE: Incoming/outcoming RAY not RADIANCE
+        let wi = intersection.to_shading(-ray.direction);
+        let n = Vec3::from(0.0, 1.0, 0.0); // NOTE: Shading space
+        let d = self.brdf.sample(wi, intersection.normal);
+        let wo = intersection.to_shading(d);
 
         let next_ray = Ray {
             origin: ray.at(intersection.t) + (d * Vec3::new(0.0001)),
@@ -415,13 +421,9 @@ impl Material {
             depth: ray.depth + 1,
         };
 
-
-        let brdf = self.diffuse_brdf.eval(
-            intersection.to_shading(d),
-            intersection.to_shading(-ray.direction),
-        );
-        // println!("{:?}", brdf);
-        self.emission + d.dot(n) * brdf * scene.trace(next_ray)
+        let brdf = self.brdf.eval(wi, n, wo);
+        let pdf = self.brdf.pdf(wi, n, wo);
+        self.emission + brdf / pdf * scene.trace(next_ray)
     }
 }
 
@@ -439,6 +441,7 @@ impl Octree {
 
         let aabbs = root_aabb.subdivide(dimension);
 
+        // FIXME: Couldnt this just be hashmap<Index, Triangle> instead?
         let mut aabb_triangles: Vec<Vec<Triangle>> = Vec::new();
         for _ in 0..dimension * dimension * dimension {
             aabb_triangles.push(Vec::new());
@@ -615,9 +618,9 @@ impl Scene {
                     z: materials[mid].diffuse[2],
                 };
 
-                let diffuse_brdf = brdf::OrenNayar::new(diffuse, 0.1);
-                // let diffuse_brdf = brdf::Lambertian::new(diffuse);
-                material.diffuse_brdf = Box::new(diffuse_brdf);
+                let brdf = brdf::Lambertian::new(diffuse);
+                // let brdf = brdf::OrenNayar::new(diffuse, 1.0);
+                material.brdf = Box::new(brdf);
 
                 let emission = &materials[mid].unknown_param["Ke"];
                 if !emission.is_empty() {
@@ -665,7 +668,7 @@ impl Scene {
             y: 0.7,
             z: 1.0,
         };
-        ((1.0 - t) * white + t * light_blue)
+        (1.0 - t) * white + t * light_blue
     }
 
     fn trace(&self, ray: Ray) -> Vec3 {
@@ -678,6 +681,7 @@ impl Scene {
             let res = octree.intersects(&ray);
             match res {
                 RaycastResult::Hit(intersection) => {
+                    // NOTE: Why do we need to check against epsilon here? Already offsetting new rays in Material::shade()
                     if intersection.t < t0 && intersection.t > std::f32::EPSILON {
                         t0 = intersection.t;
                         material = &octree.material;
@@ -697,23 +701,20 @@ impl Scene {
 
 enum Encoding {
     RGB { r: f32, g: f32, b: f32 }, // RGB with 32b float/channel
-    ARGB(u32), // ARGB with 8 byte/channel
+    ARGB(u32),                      // ARGB with 8 byte/channel
 }
 
 // Encodes the color and packing it in a Encoding enum
-fn encode_color(encoding: Encoding, mut color: Vec3) -> Encoding {
-    // TODO: Implement f32.clamp and refactor this, used to avoid fireflies
+fn encode_color(encoding: Encoding, color: Vec3) -> Encoding {
     match encoding {
         Encoding::ARGB(_) => {
-            color.x = if color.x > 1.0 { 1.0 } else { color.x };
-            color.y = if color.y > 1.0 { 1.0 } else { color.y };
-            color.z = if color.z > 1.0 { 1.0 } else { color.z };
-            color.x = if color.x < 0.0 { 0.0 } else { color.x };
-            color.y = if color.y < 0.0 { 0.0 } else { color.y };
-            color.z = if color.z < 0.0 { 0.0 } else { color.z };
-            let ir = (color.x.sqrt() * 255.99) as u32;
-            let ig = (color.y.sqrt() * 255.99) as u32;
-            let ib = (color.z.sqrt() * 255.99) as u32;
+            // NOTE: Filter out NaNs is never equal to itself
+            let x = if color.x != color.x { 0.0 } else { color.x };
+            let y = if color.y != color.y { 0.0 } else { color.y };
+            let z = if color.z != color.z { 0.0 } else { color.z };
+            let ir = (x.clamp(0.0, 1.0).sqrt() * 255.99) as u32;
+            let ig = (y.clamp(0.0, 1.0).sqrt() * 255.99) as u32;
+            let ib = (z.clamp(0.0, 1.0).sqrt() * 255.99) as u32;
             let ia = 1_u32;
             let mut pixel = 0_u32;
             pixel += ia << 24;
@@ -730,11 +731,11 @@ fn encode_color(encoding: Encoding, mut color: Vec3) -> Encoding {
     }
 }
 
-// TODO: Use normals as aux. buffer for the denoising
 // TODO: Spheres, define geometry mathematically, etc
 // TODO: Use benchmarks to test performance of trace, shade, etc
 fn main() {
     let mut screen_buffer: Vec<u32> = vec![0; WINDOW_WIDTH * WINDOW_HEIGHT];
+    let mut screen_buffer_rgbf: Vec<Vec3> = vec![Vec3::zero(); WINDOW_WIDTH * WINDOW_HEIGHT];
 
     let mut window = Window::new(
         "Rusteray",
@@ -745,14 +746,6 @@ fn main() {
     .unwrap_or_else(|e| {
         panic!("{}", e);
     });
-
-    // Setup Intel OpenImageDenoise library
-    let mut device = oidn::Device::new();
-    let mut filter = oidn::RayTracing::new(&mut device);
-    filter.set_img_dims(WINDOW_WIDTH, WINDOW_HEIGHT);
-
-    let mut filter_in_buffer: Vec<f32> = vec![0.0; 3 * WINDOW_WIDTH * WINDOW_HEIGHT];
-    let mut filter_out_buffer: Vec<f32> = vec![0.0; 3 * WINDOW_WIDTH * WINDOW_HEIGHT];
 
     let directory = std::env::current_dir().unwrap_or_default();
     let filepath = format!(
@@ -780,7 +773,6 @@ fn main() {
     println!("Using {} threads in threadpool ... \n", num_cpus::get());
     let pool = ThreadPool::new(num_cpus::get());
 
-    let denoise = true; // Whether or not to denoise the image
     println!(
         "WINDOW: {}x{} \nRAY DEPTH MAX: {} \nSAMPLES PER PIXEL (SPP): {}\n",
         WINDOW_WIDTH, WINDOW_HEIGHT, RAY_DEPTH_MAX, SAMPLES_PER_PIXEL
@@ -789,38 +781,41 @@ fn main() {
     let (tx, rx) = std::sync::mpsc::channel();
 
     let mut diff_sum = std::time::Duration::new(0, 0);
-    let mut frames = 0;
+    let mut frames = 1;
 
     while window.is_open() && !window.is_key_down(Key::Escape) {
         let start = std::time::Instant::now();
+
+        let mut rng = rand::thread_rng();
+        let mut noise = BlueNoise::<Pcg64Mcg>::new(1.0, 1.0, 0.02);
+        let points = noise
+            .with_seed(rng.gen())
+            .take(SAMPLES_PER_PIXEL as usize)
+            .collect::<Vec<_>>();
 
         for x in 0..WINDOW_WIDTH {
             for y in 0..WINDOW_HEIGHT {
                 let tx = tx.clone();
                 let scene = Arc::clone(&scene);
+                let points = points.clone();
                 pool.execute(move || {
-                    let mut rng = rand::thread_rng();
                     let mut color = Vec3::zero();
-                    for _ in 0..SAMPLES_PER_PIXEL {
+                    for point in points {
                         // Flipped variable t s.t y+ axis is up
-                        let r: f32 = rng.gen();
-                        let s = ((x as f32) + r) / (WINDOW_WIDTH as f32);
-                        let t = ((y as f32) + r) / (WINDOW_HEIGHT as f32);
+                        let s = ((x as f32) + point.x) / (WINDOW_WIDTH as f32);
+                        let t = ((y as f32) + point.y) / (WINDOW_HEIGHT as f32);
                         let ray = camera.ray(s, t);
                         color = color + scene.trace(ray);
                     }
-                    color = color / (SAMPLES_PER_PIXEL as f32);
+                    let scale = 1.0 / (SAMPLES_PER_PIXEL as f32);
+                    color = color * scale;
                     tx.send((x, y, color)).expect("Failed to send pixel!");
                 });
             }
         }
 
         // Update and display progress bar - uncomment for small perf. inc.
-        let work_units = if denoise {
-            2 * WINDOW_WIDTH * WINDOW_HEIGHT
-        } else {
-            WINDOW_WIDTH * WINDOW_HEIGHT
-        };
+        let work_units = WINDOW_WIDTH * WINDOW_HEIGHT;
         let progress_bar = indicatif::ProgressBar::new(work_units as u64);
         progress_bar.set_style(
             indicatif::ProgressStyle::default_bar()
@@ -831,59 +826,17 @@ fn main() {
         for _ in 0..WINDOW_WIDTH * WINDOW_HEIGHT {
             let (x, y, pixel) = rx.recv().unwrap_or_default();
 
-            // Encode as RGB32f
-            match encode_color(
-                Encoding::RGB {
-                    r: 0.0,
-                    g: 0.0,
-                    b: 0.0,
-                },
-                pixel,
-            ) {
-                Encoding::RGB { r, g, b } => {
-                    let idx = 3 * (y * WINDOW_WIDTH + x);
-                    filter_in_buffer[idx + 0] = r;
-                    filter_in_buffer[idx + 1] = g;
-                    filter_in_buffer[idx + 2] = b;
-                }
-                _ => (),
+            let sum = ((screen_buffer_rgbf[y * WINDOW_WIDTH + x] * frames) + pixel)
+                / ((frames + 1) as f32);
+            screen_buffer_rgbf[y * WINDOW_WIDTH + x] = sum;
+
+            // Encode as ARGB8
+            screen_buffer[y * WINDOW_WIDTH + x] = match encode_color(Encoding::ARGB(0), sum) {
+                Encoding::ARGB(encoded) => encoded,
+                _ => 0,
             };
 
-            if !denoise {
-                // Encode as ARGB8
-                screen_buffer[y * WINDOW_WIDTH + x] = match encode_color(Encoding::ARGB(0), pixel) {
-                    Encoding::ARGB(encoded) => encoded,
-                    _ => 0,
-                };
-            }
-
             progress_bar.inc(1);
-        }
-
-        // Denoise
-        if denoise {
-            filter.execute(&filter_in_buffer[..], &mut filter_out_buffer[..]);
-
-            if let Err(e) = device.get_error() {
-                println!("Error denoising image: {}", e.1);
-            }
-
-            // Encoding conversion
-            for x in 0..WINDOW_WIDTH {
-                for y in 0..WINDOW_HEIGHT {
-                    let idx = 3 * (y * WINDOW_WIDTH + x);
-                    let r = filter_out_buffer[idx + 0];
-                    let g = filter_out_buffer[idx + 1];
-                    let b = filter_out_buffer[idx + 2];
-                    let pixel = Vec3::from(r, g, b);
-                    screen_buffer[y * WINDOW_WIDTH + x] =
-                        match encode_color(Encoding::ARGB(0), pixel) {
-                            Encoding::ARGB(encoded) => encoded,
-                            _ => 0,
-                        };
-                    progress_bar.inc(1);
-                }
-            }
         }
 
         progress_bar.finish();
@@ -906,8 +859,8 @@ fn main() {
             frames,
             diff.as_secs(),
             diff.subsec_millis(),
-            (diff_sum / frames).as_secs(),
-            (diff_sum / frames).subsec_millis()
+            (diff_sum / (frames as u32)).as_secs(),
+            (diff_sum / (frames as u32)).subsec_millis()
         );
         println!("{}", info);
 
