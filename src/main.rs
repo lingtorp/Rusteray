@@ -783,6 +783,7 @@ fn main() {
     let mut diff_sum = std::time::Duration::new(0, 0);
     let mut frames = 1;
 
+    let start_time = std::time::Instant::now();
     while window.is_open() && !window.is_key_down(Key::Escape) {
         let start = std::time::Instant::now();
 
@@ -855,12 +856,14 @@ fn main() {
         frames += 1;
         diff_sum += diff;
         let info = format!(
-            "- Frame #{}: {}.{} s/frame, {}.{} avg \n",
+            "- Frame #{}: {}.{} s/frame, {}.{} avg, {}.{} s \n",
             frames,
             diff.as_secs(),
             diff.subsec_millis(),
             (diff_sum / (frames as u32)).as_secs(),
-            (diff_sum / (frames as u32)).subsec_millis()
+            (diff_sum / (frames as u32)).subsec_millis(),
+            (std::time::Instant::now() - start_time).as_secs(),
+            (std::time::Instant::now() - start_time).subsec_millis()
         );
         println!("{}", info);
 
