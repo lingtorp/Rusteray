@@ -23,10 +23,24 @@ Rusteray, a physically based path tracer written in Rust.
 
 ## TODOs
 - .gltf2 scene support?
+    - config.json
+        - frames to render
+        - samples per ray
+        - denoising or not
+        - windows size
+        - scene background color
+    - scene to load?
+    - BRDFs on which model (mapping)?
+- Explicit light sampling / next event estimation / shadow rays
+    - Split direct + indirect
+- Diffuse & Specular BRDF support on materials?
+    - Subsurface scattering BRDF support?
+    - Model volume support
+- Russian roulette termination (min bounds?)
 
 ## References
 - [Ray Tracing: In One Weekend](https://in1weekend.blogspot.com/) by Peter Shirley.
-- Real-Time Rendering by Akenin-Möller, Haines, et al.
+- Real-Time Rendering 4th edition by Akenin-Möller, Haines, et al.
 - Physically Based Rendering by Matt Pharr.
 - Oren-Nayar BRDF [publication](http://www1.cs.columbia.edu/CAVE/publications/pdfs/Oren_SIGGRAPH94.pdf)
 
