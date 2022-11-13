@@ -25,6 +25,10 @@ impl Vec3 {
         Vec3 { x: s, y: s, z: s }
     }
 
+    pub fn one() -> Vec3 {
+        Vec3::new(1.0)
+    }
+
     pub fn zero() -> Vec3 {
         Vec3::new(0.0)
     }
