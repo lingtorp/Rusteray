@@ -800,7 +800,7 @@ fn main() {
                 let points = points.clone();
                 pool.execute(move || {
                     let mut color = Vec3::zero();
-                    for point in points {
+                    for point in &points {
                         // Flipped variable t s.t y+ axis is up
                         let s = ((x as f32) + point.x) / (WINDOW_WIDTH as f32);
                         let t = ((y as f32) + point.y) / (WINDOW_HEIGHT as f32);
