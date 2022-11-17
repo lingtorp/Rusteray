@@ -27,6 +27,8 @@ use rand_pcg::Pcg64Mcg;
 
 use clap::Parser;
 
+use crate::brdf::Lambertian;
+
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -618,9 +620,11 @@ impl Scene {
                     z: materials[mid].diffuse[2],
                 };
 
-                let brdf = brdf::Lambertian::new(diffuse);
-                // let brdf = brdf::OrenNayar::new(diffuse, 1.0);
-                material.brdf = Box::new(brdf);
+                match materials[mid].illumination_model.unwrap_or_default() {
+                    0 => material.brdf = Box::new(brdf::Lambertian::new(diffuse)),
+                    1 => material.brdf = Box::new(brdf::OrenNayar::new(diffuse, 1.0)),
+                    _ => panic!(),
+                }
 
                 let emission = &materials[mid].unknown_param["Ke"];
                 if !emission.is_empty() {
