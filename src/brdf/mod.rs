@@ -1,5 +1,3 @@
-use std::f32::consts::FRAC_2_PI;
-
 use crate::linalg::Vec3;
 use crate::linalg::{self, random_0_1};
 

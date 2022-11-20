@@ -27,8 +27,6 @@ use rand_pcg::Pcg64Mcg;
 
 use clap::Parser;
 
-use crate::brdf::Lambertian;
-
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
