@@ -31,9 +31,10 @@ Rusteray, a physically based path tracer written in Rust.
         - scene background color
     - scene to load?
     - BRDFs on which model (mapping)?
-- Explicit light sampling / next event estimation / shadow rays
-    - Split direct + indirect
+- Explicit light sampling / next event estimation 
 - Diffuse & Specular BRDF support on materials?
+    - Unify BSDF = BRDF + BTDF?
+    - Bi-directional Transmission Distribution Function support (BTDF)?
     - Subsurface scattering BRDF support?
     - Model volume support
 - Russian roulette termination (min bounds?)
