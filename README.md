@@ -7,10 +7,10 @@ Rusteray, a physically based path tracer written in Rust.
 
 ## Features
 - [X] BRDF support: Lambertian, Oren-Nayar 
-- [X] .obj model support
 - [X] Multithreaded with a threadpool
 - [X] Denoising support via [Intel OpenImageDenoise](https://github.com/OpenImageDenoise/oidn)
-- [ ] JSON scene description format
+- [X] JSON config 
+- [X] gltf2 model support
 
 ## Showcase
 | ![](screenshots/cornell-oren-nayar-10spp.png) |
