@@ -25,21 +25,31 @@ extern crate num_cpus;
 use bluenoise::BlueNoise;
 use rand_pcg::Pcg64Mcg;
 
-use clap::Parser;
-
-/// Simple program to greet a person
-#[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
-struct Args {
-    /// Number of frames to render
-    #[arg(short, long, default_value_t = 1)]
-    frames: u8,
-}
+use serde::{Deserialize, Serialize};
+use serde_json::Result;
 
 const WINDOW_WIDTH: usize = 600;
 const WINDOW_HEIGHT: usize = 600;
 const SAMPLES_PER_PIXEL: usize = 25;
 const RAY_DEPTH_MAX: usize = 10;
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Config {
+    progress_bar: bool,
+    denoise: bool,
+    window_width: u32,
+    window_height: u32,
+    frames_to_render: u32,
+    quit_after_render: bool,
+    save_rendered_image_path: String,
+    ray_samples: u32,
+    ray_depth: u32,
+    scene_paths: Vec<String>,
+    scene_background_color: Vec3,
+    camera_position: Vec3,
+    camera_direction: Vec3,
+    camera_fov: u32,
+}
 
 #[derive(Debug, Copy, Clone)]
 struct Camera {
@@ -511,13 +521,39 @@ impl Octree {
     }
 }
 
-// TODO: Add emitter/light list
 struct Scene {
     octrees: Vec<Octree>,
+    background_color: Vec3,
 }
 
 impl Scene {
+    fn from(paths: Vec<&str>) -> Scene {
+        let mut octrees: Vec<Octree> = vec![];
+        for path in paths {
+            octrees.append(&mut Scene::load(path));
+        }
+        Scene {
+            octrees: octrees,
+            background_color: Vec3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        }
+    }
+
     fn new(path: &str) -> Scene {
+        Scene {
+            octrees: Scene::load(path),
+            background_color: Vec3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        }
+    }
+
+    fn load(path: &str) -> Vec<Octree> {
         let start = std::time::Instant::now();
         println!("Starting to load scene {}", path);
 
@@ -618,11 +654,18 @@ impl Scene {
                     z: materials[mid].diffuse[2],
                 };
 
+                // NOTE: BRDF selection based on illumination model of object
                 match materials[mid].illumination_model.unwrap_or_default() {
                     0 => material.brdf = Box::new(brdf::Lambertian::new(diffuse)),
                     1 => material.brdf = Box::new(brdf::OrenNayar::new(diffuse, 1.0)),
                     _ => panic!(),
                 }
+
+                // TODO: BTDF selection?
+                // match materials[mid].unknown_param["btdf"].unwrap_or_default() {
+                //     0 => material.brdf = Box::new(btdf::?),
+                //     _ => material.btdf = nil
+                // }
 
                 let emission = &materials[mid].unknown_param["Ke"];
                 if !emission.is_empty() {
@@ -659,7 +702,7 @@ impl Scene {
             diff.subsec_millis()
         );
 
-        Scene { octrees: octrees }
+        octrees
     }
 
     fn trace_background(&self, ray: Ray) -> Vec3 {
@@ -733,11 +776,11 @@ fn encode_color(encoding: Encoding, color: Vec3) -> Encoding {
     }
 }
 
-// TODO: Spheres, define geometry mathematically, etc
-// TODO: Use benchmarks to test performance of trace, shade, etc
 fn main() {
     let mut screen_buffer: Vec<u32> = vec![0; WINDOW_WIDTH * WINDOW_HEIGHT];
     let mut screen_buffer_rgbf: Vec<Vec3> = vec![Vec3::zero(); WINDOW_WIDTH * WINDOW_HEIGHT];
+
+    // TODO: Load and parse the config parameters
 
     let mut window = Window::new(
         "Rusteray",
@@ -746,7 +789,7 @@ fn main() {
         WindowOptions::default(),
     )
     .unwrap_or_else(|e| {
-        panic!("{}", e);
+        panic!("Could not create a window with error: {}", e);
     });
 
     let directory = std::env::current_dir().unwrap_or_default();

@@ -1,7 +1,9 @@
 extern crate rand;
 use rand_distr::{Distribution, Uniform, UnitSphere};
 
-#[derive(Debug, Clone, Copy)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Vec3 {
     pub x: f32,
     pub y: f32,
