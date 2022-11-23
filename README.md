@@ -29,6 +29,8 @@ Rusteray, a physically based path tracer written in Rust.
         - denoising or not
         - windows size
         - scene background color
+          - scene background color gradient?
+          - scene background atmosphere modeling?
     - scene to load?
     - BRDFs on which model (mapping)?
 - Explicit light sampling / next event estimation 
@@ -38,6 +40,27 @@ Rusteray, a physically based path tracer written in Rust.
     - Subsurface scattering BRDF support?
     - Model volume support
 - Russian roulette termination (min bounds?)
+
+## Config.json documentation
+```json
+{
+    "progress_bar": true,
+    "denoise": false,
+    "window_width": 600,
+    "window_height": 600,
+    "frames_to_render": 20,
+    "quit_after_render": false,
+    "save_rendered_image_path": "",                          // NOTE: Relative to the executable
+    "ray_samples_per_pixel": 25,
+    "ray_max_depth": 10,
+    "scene_paths": ["/models/cornell_box/cornell_box.obj"],  // NOTE: Relative to the executable
+    "scene_background_color": [0.5, 0.7, 1.0],               // NOTE: RGB format [0, 1.0]
+    "camera_position": [0.0, 1.0, 3.1],
+    "camera_direction": [0.0, 1.0, 0.0],
+    "camera_fov": 50.0                                       // NOTE: Degrees
+}
+```
+Example of default value config.
 
 ## References
 - [Ray Tracing: In One Weekend](https://in1weekend.blogspot.com/) by Peter Shirley.
