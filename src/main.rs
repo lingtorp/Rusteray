@@ -423,10 +423,6 @@ impl Material {
     }
 
     fn shade(&self, scene: &Scene, ray: Ray, intersection: Intersection) -> Vec3 {
-        // if ray.depth == RAY_DEPTH_MAX {
-        //     return Vec3::zero();
-        // }
-
         // NOTE: Incoming/outcoming RAY not RADIANCE
         let wi = intersection.to_shading(-ray.direction);
         let n = Vec3::from(0.0, 1.0, 0.0); // NOTE: Shading space
@@ -656,7 +652,7 @@ impl Scene {
                 match materials[mid].illumination_model.unwrap_or_default() {
                     0 => material.brdf = Box::new(brdf::Lambertian::new(diffuse)),
                     1 => material.brdf = Box::new(brdf::OrenNayar::new(diffuse, 1.0)),
-                    _ => panic!(),
+                    _ => panic!("Could not map material BRDF to a supported one"),
                 }
 
                 // TODO: BTDF selection?
@@ -706,12 +702,7 @@ impl Scene {
     fn trace_background(&self, ray: Ray) -> Vec3 {
         let t = 0.5 * (ray.direction.y + 1.0);
         let white = Vec3::new(1.0);
-        let light_blue = Vec3 {
-            x: 0.5,
-            y: 0.7,
-            z: 1.0,
-        };
-        (1.0 - t) * white + t * light_blue
+        (1.0 - t) * white + t * self.background_color
     }
 
     fn trace(&self, ray: Ray) -> Vec3 {
