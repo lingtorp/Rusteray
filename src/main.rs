@@ -5,6 +5,9 @@ extern crate tobj;
 
 use std::path::Path;
 
+use std::fs::File;
+use std::io::prelude::*;
+
 extern crate rand;
 use rand::prelude::*;
 
@@ -28,27 +31,40 @@ use rand_pcg::Pcg64Mcg;
 use serde::{Deserialize, Serialize};
 use serde_json::Result;
 
-const WINDOW_WIDTH: usize = 600;
-const WINDOW_HEIGHT: usize = 600;
-const SAMPLES_PER_PIXEL: usize = 25;
 const RAY_DEPTH_MAX: usize = 10;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Config {
     progress_bar: bool,
     denoise: bool,
-    window_width: u32,
-    window_height: u32,
+    window_width: usize,
+    window_height: usize,
     frames_to_render: u32,
     quit_after_render: bool,
     save_rendered_image_path: String,
-    ray_samples: u32,
+    ray_samples_per_pixel: u32,
     ray_depth: u32,
     scene_paths: Vec<String>,
     scene_background_color: Vec3,
     camera_position: Vec3,
     camera_direction: Vec3,
-    camera_fov: u32,
+    camera_fov: f32,
+}
+
+impl Config {
+    fn load_file(filepath: &str) -> std::io::Result<String> {
+        let mut file = File::open(filepath)?;
+        let mut contents = String::new();
+        file.read_to_string(&mut contents)?;
+        Ok(contents)
+    }
+
+    fn load(filepath: &str) -> Result<Config> {
+        match Config::load_file(filepath) {
+            Ok(contents) => serde_json::from_str(&contents),
+            Err(e) => panic!("{}", e),
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -61,10 +77,13 @@ struct Camera {
 }
 
 impl Camera {
-    fn new(fov_degrees: f32, from: Vec3, to: Vec3) -> Camera {
-        let aspect = (WINDOW_WIDTH as f32) / (WINDOW_HEIGHT as f32);
+    fn from(cfg: &Config) -> Camera {
+        let from = cfg.camera_position;
+        let to = cfg.camera_direction;
 
-        let half_height = (fov_degrees.to_radians() / 2.0).tan();
+        let aspect = (cfg.window_width as f32) / (cfg.window_height as f32);
+
+        let half_height = (cfg.camera_fov.to_radians() / 2.0).tan();
         let half_width = aspect * half_height;
 
         let wup = Vec3::y();
@@ -83,7 +102,7 @@ impl Camera {
             u: horizontal,
             v: vertical,
             position: from,
-            fov: fov_degrees,
+            fov: cfg.camera_fov,
         }
     }
 
@@ -364,16 +383,7 @@ impl AABB {
     fn is_point_inside(&self, p: Vec3) -> bool {
         let min = self.min;
         let max = self.max;
-        if p.x <= max.x
-            && p.y <= max.y
-            && p.z <= max.z
-            && p.x >= min.x
-            && p.y >= min.y
-            && p.z >= min.z
-        {
-            return true;
-        }
-        false
+        p.x <= max.x && p.y <= max.y && p.z <= max.z && p.x >= min.x && p.y >= min.y && p.z >= min.z
     }
 
     fn subdivide(&self, dimension: usize) -> Vec<AABB> {
@@ -777,22 +787,34 @@ fn encode_color(encoding: Encoding, color: Vec3) -> Encoding {
 }
 
 fn main() {
-    let mut screen_buffer: Vec<u32> = vec![0; WINDOW_WIDTH * WINDOW_HEIGHT];
-    let mut screen_buffer_rgbf: Vec<Vec3> = vec![Vec3::zero(); WINDOW_WIDTH * WINDOW_HEIGHT];
+    // Load and parse the config parameters
+    let directory = std::env::current_dir().unwrap_or_default();
+    let cfgpath = format!(
+        "{}{}",
+        directory.to_str().unwrap_or_default(),
+        "/config.json" // FIXME: Specify this file via Clap ..
+    );
 
-    // TODO: Load and parse the config parameters
+    let cfg = Config::load(&cfgpath).unwrap_or_else(|e| {
+        panic!("Could not load config with error: {}", e);
+    });
+
+    println!("Loaded config ... \n {:#?}", cfg);
+
+    let mut screen_buffer: Vec<u32> = vec![0; cfg.window_width * cfg.window_height];
+    let mut screen_buffer_rgbf: Vec<Vec3> =
+        vec![Vec3::zero(); cfg.window_width * cfg.window_height];
 
     let mut window = Window::new(
         "Rusteray",
-        WINDOW_WIDTH,
-        WINDOW_HEIGHT,
+        cfg.window_width,
+        cfg.window_height,
         WindowOptions::default(),
     )
     .unwrap_or_else(|e| {
         panic!("Could not create a window with error: {}", e);
     });
 
-    let directory = std::env::current_dir().unwrap_or_default();
     let filepath = format!(
         "{}{}",
         directory.to_str().unwrap_or_default(),
@@ -800,28 +822,11 @@ fn main() {
     );
     let scene = Arc::new(Scene::new(&filepath));
 
-    // FIXME: From one axis does not work
-    let from = Vec3 {
-        x: 0.0,
-        y: 1.0,
-        z: 3.1,
-    };
-
-    let to = Vec3 {
-        x: 0.0,
-        y: 1.0,
-        z: 0.0,
-    };
-
-    let camera = Camera::new(50.0, from, to);
+    // FIXME: From one axis does not work - what does this even mean?
+    let camera = Camera::from(&cfg);
 
     println!("Using {} threads in threadpool ... \n", num_cpus::get());
     let pool = ThreadPool::new(num_cpus::get());
-
-    println!(
-        "WINDOW: {}x{} \nRAY DEPTH MAX: {} \nSAMPLES PER PIXEL (SPP): {}\n",
-        WINDOW_WIDTH, WINDOW_HEIGHT, RAY_DEPTH_MAX, SAMPLES_PER_PIXEL
-    );
 
     let (tx, rx) = std::sync::mpsc::channel();
 
@@ -835,11 +840,11 @@ fn main() {
         let start = std::time::Instant::now();
         let points = noise
             .with_seed(rng.gen())
-            .take(SAMPLES_PER_PIXEL as usize)
+            .take(cfg.ray_samples_per_pixel as usize)
             .collect::<Vec<_>>();
 
-        for x in 0..WINDOW_WIDTH {
-            for y in 0..WINDOW_HEIGHT {
+        for x in 0..cfg.window_width {
+            for y in 0..cfg.window_height {
                 let tx = tx.clone();
                 let scene = Arc::clone(&scene);
                 let points = points.clone();
@@ -847,12 +852,12 @@ fn main() {
                     let mut color = Vec3::zero();
                     for point in &points {
                         // Flipped variable t s.t y+ axis is up
-                        let s = ((x as f32) + point.x) / (WINDOW_WIDTH as f32);
-                        let t = ((y as f32) + point.y) / (WINDOW_HEIGHT as f32);
+                        let s = ((x as f32) + point.x) / (cfg.window_width as f32);
+                        let t = ((y as f32) + point.y) / (cfg.window_height as f32);
                         let ray = camera.ray(s, t);
                         color = color + scene.trace(ray);
                     }
-                    let scale = 1.0 / (SAMPLES_PER_PIXEL as f32);
+                    let scale = 1.0 / (cfg.ray_samples_per_pixel as f32);
                     color = color * scale;
                     tx.send((x, y, color)).expect("Failed to send pixel!");
                 });
@@ -860,7 +865,7 @@ fn main() {
         }
 
         // Update and display progress bar - uncomment for small perf. inc.
-        let work_units = WINDOW_WIDTH * WINDOW_HEIGHT;
+        let work_units = cfg.window_width * cfg.window_height;
         let progress_bar = indicatif::ProgressBar::new(work_units as u64);
         progress_bar.set_style(
             indicatif::ProgressStyle::default_bar()
@@ -868,15 +873,15 @@ fn main() {
                 .progress_chars("=>-"),
         );
 
-        for _ in 0..WINDOW_WIDTH * WINDOW_HEIGHT {
+        for _ in 0..cfg.window_width * cfg.window_height {
             let (x, y, pixel) = rx.recv().unwrap_or_default();
 
-            let sum = ((screen_buffer_rgbf[y * WINDOW_WIDTH + x] * frames) + pixel)
+            let sum = ((screen_buffer_rgbf[y * cfg.window_width + x] * frames) + pixel)
                 / ((frames + 1) as f32);
-            screen_buffer_rgbf[y * WINDOW_WIDTH + x] = sum;
+            screen_buffer_rgbf[y * cfg.window_width + x] = sum;
 
             // Encode as ARGB8
-            screen_buffer[y * WINDOW_WIDTH + x] = match encode_color(Encoding::ARGB(0), sum) {
+            screen_buffer[y * cfg.window_width + x] = match encode_color(Encoding::ARGB(0), sum) {
                 Encoding::ARGB(encoded) => encoded,
                 _ => 0,
             };
