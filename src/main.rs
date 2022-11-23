@@ -818,7 +818,7 @@ fn main() {
     let (tx, rx) = std::sync::mpsc::channel();
 
     let mut diff_sum = std::time::Duration::new(0, 0);
-    let mut frames = 1;
+    let mut frames = 0;
     let mut rng = rand::thread_rng();
     let mut noise = BlueNoise::<Pcg64Mcg>::new(1.0, 1.0, 0.02);
 
@@ -860,6 +860,7 @@ fn main() {
                 .progress_chars("=>-"),
         );
 
+        frames += 1;
         for _ in 0..cfg.window_width * cfg.window_height {
             let (x, y, pixel) = rx.recv().unwrap_or_default();
 
@@ -889,7 +890,6 @@ fn main() {
 
         window.set_title(&title);
 
-        frames += 1;
         diff_sum += diff;
         let info = format!(
             "- Frame #{}: {}.{} s/frame, {}.{} avg, {}.{} s \n",
