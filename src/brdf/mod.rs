@@ -1,5 +1,5 @@
+use crate::linalg;
 use crate::linalg::Vec3;
-use crate::linalg::{self, random_0_1};
 
 // TODO: Needs access to blue noise or some low discrepencies noise source to sample uniformly
 pub trait BRDF: Send + Sync {
