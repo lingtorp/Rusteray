@@ -23,16 +23,15 @@ Rusteray, a physically based path tracer written in Rust.
 
 ## TODOs
 - .gltf2 scene support?
+    - support .gltf2 BRDF and materials?
     - config.json
         - frames to render
-        - samples per ray
         - denoising or not
-        - windows size
         - scene background color
           - scene background color gradient?
           - scene background atmosphere modeling?
-    - scene to load?
-    - BRDFs on which model (mapping)?
+    - scene(s) to load?
+    - BSDFs on which model (mapping)?
 - Explicit light sampling / next event estimation 
 - Diffuse & Specular BRDF support on materials?
     - Unify BSDF = BRDF + BTDF?
@@ -40,16 +39,21 @@ Rusteray, a physically based path tracer written in Rust.
     - Subsurface scattering BRDF support?
     - Model volume support
 - Russian roulette termination (min bounds?)
+- Statistics
+  - Number of rays launched
+  - Number of bounces
+- Moveable camera
+- Textures?
 
 ## Config.json documentation
 ```json
 {
-    "progress_bar": true,
-    "denoise": false,
+    "progress_bar": true,                                    // FIXME: Not implemented
+    "denoise": false,                                        // FIXME: Not implemented
     "window_width": 600,
     "window_height": 600,
-    "frames_to_render": 20,
-    "quit_after_render": false,
+    "frames_to_render": 20,                                  // FIXME: Not implemented
+    "quit_after_render": false,                              // FIXME: Not implemented
     "save_rendered_image_path": "",                          // NOTE: Relative to the executable
     "ray_samples_per_pixel": 25,
     "ray_max_depth": 10,
