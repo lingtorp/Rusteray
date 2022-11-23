@@ -2,7 +2,7 @@
 name = "rusteray"
 version = "0.1.0"
 authors = ["Alexander Lingtorp <alexander@lingtorp.com>"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 minifb = "0.12"
