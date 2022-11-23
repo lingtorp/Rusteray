@@ -31,8 +31,6 @@ use rand_pcg::Pcg64Mcg;
 use serde::{Deserialize, Serialize};
 use serde_json::Result;
 
-const RAY_DEPTH_MAX: usize = 10;
-
 #[derive(Debug, Serialize, Deserialize)]
 struct Config {
     progress_bar: bool,
@@ -43,7 +41,7 @@ struct Config {
     quit_after_render: bool,
     save_rendered_image_path: String,
     ray_samples_per_pixel: u32,
-    ray_depth: u32,
+    ray_max_depth: usize,
     scene_paths: Vec<String>,
     scene_background_color: Vec3,
     camera_position: Vec3,
@@ -425,9 +423,9 @@ impl Material {
     }
 
     fn shade(&self, scene: &Scene, ray: Ray, intersection: Intersection) -> Vec3 {
-        if ray.depth == RAY_DEPTH_MAX {
-            return Vec3::zero();
-        }
+        // if ray.depth == RAY_DEPTH_MAX {
+        //     return Vec3::zero();
+        // }
 
         // NOTE: Incoming/outcoming RAY not RADIANCE
         let wi = intersection.to_shading(-ray.direction);
@@ -454,6 +452,7 @@ struct Octree {
     material: Material,
 }
 
+// FIXME: Octree == One model currently, should rather be all triangles in the scene?
 impl Octree {
     /// Octree construction of a single model
     fn new(dimension: usize, triangles: Vec<Triangle>, material: Material) -> Octree {
@@ -534,32 +533,21 @@ impl Octree {
 struct Scene {
     octrees: Vec<Octree>,
     background_color: Vec3,
+    ray_max_depth: usize,
 }
 
 impl Scene {
-    fn from(paths: Vec<&str>) -> Scene {
+    fn from(cfg: &Config) -> Scene {
         let mut octrees: Vec<Octree> = vec![];
-        for path in paths {
-            octrees.append(&mut Scene::load(path));
+        let directory = std::env::current_dir().unwrap_or_default();
+        for path in &cfg.scene_paths {
+            let filepath = format!("{}{}", directory.to_str().unwrap_or_default(), path);
+            octrees.append(&mut Scene::load(&filepath));
         }
         Scene {
             octrees: octrees,
-            background_color: Vec3 {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-            },
-        }
-    }
-
-    fn new(path: &str) -> Scene {
-        Scene {
-            octrees: Scene::load(path),
-            background_color: Vec3 {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-            },
+            background_color: cfg.scene_background_color,
+            ray_max_depth: cfg.ray_max_depth,
         }
     }
 
@@ -727,6 +715,10 @@ impl Scene {
     }
 
     fn trace(&self, ray: Ray) -> Vec3 {
+        if ray.depth == self.ray_max_depth {
+            return Vec3::zero();
+        }
+
         let mut t0 = std::f32::MAX;
         let mut result = RaycastResult::Miss;
         let mut material = &Material::new();
@@ -799,7 +791,7 @@ fn main() {
         panic!("Could not load config with error: {}", e);
     });
 
-    println!("Loaded config ... \n {:#?}", cfg);
+    println!("Loaded config ... \n{:#?}", cfg);
 
     let mut screen_buffer: Vec<u32> = vec![0; cfg.window_width * cfg.window_height];
     let mut screen_buffer_rgbf: Vec<Vec3> =
@@ -815,12 +807,7 @@ fn main() {
         panic!("Could not create a window with error: {}", e);
     });
 
-    let filepath = format!(
-        "{}{}",
-        directory.to_str().unwrap_or_default(),
-        "/models/cornell_box/cornell_box.obj"
-    );
-    let scene = Arc::new(Scene::new(&filepath));
+    let scene = Arc::new(Scene::from(&cfg));
 
     // FIXME: From one axis does not work - what does this even mean?
     let camera = Camera::from(&cfg);
