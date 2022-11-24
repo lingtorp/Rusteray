@@ -1,0 +1,16 @@
+{
+    "progress_bar": true,
+    "denoise": false,
+    "window_width": 600,
+    "window_height": 600,
+    "frames_to_render": 20,
+    "quit_after_render": false,
+    "save_rendered_image_path": "",
+    "ray_samples_per_pixel": 25,
+    "ray_max_depth": 10,
+    "scene_paths": ["/models/cornell_box/cornell_box.obj"],
+    "scene_background_color": [0.5, 0.7, 1.0],
+    "camera_position": [0.0, 1.0, 3.1],
+    "camera_direction": [0.0, 1.0, 0.0],
+    "camera_fov": 50.0
+}
